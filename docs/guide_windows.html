@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guía de Instalación Windows - Atlas Interactivo</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        .guide-header {
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            color: white;
+            padding: 100px 0 60px;
+            margin-top: 70px;
+        }
+        
+        .guide-header h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        
+        .guide-header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            max-width: 800px;
+        }
+        
+        .guide-content {
+            padding: 60px 0;
+        }
+        
+        .step-card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            padding: 2.5rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow);
+            border-left: 6px solid #2563eb;
+        }
+        
+        .step-number {
+            display: inline-block;
+            background: #2563eb;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 40px;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
+        
+        .step-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .screenshot {
+            max-width: 100%;
+            border-radius: 10px;
+            margin: 1.5rem 0;
+            box-shadow: var(--shadow);
+        }
+        
+        .code-block {
+            background: var(--bg-secondary);
+            padding: 1.5rem;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            margin: 1rem 0;
+            overflow-x: auto;
+        }
+        
+        .tip-box {
+            background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%);
+            border-left: 4px solid #3b82f6;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0;
+        }
+        
+        [data-theme="dark"] .tip-box {
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+        }
+        
+        .warning-box {
+            background: linear-gradient(135deg, #fef3c7 0%, #fffbeb 100%);
+            border-left: 4px solid #f59e0b;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0;
+        }
+        
+        [data-theme="dark"] .warning-box {
+            background: linear-gradient(135deg, #92400e 0%, #b45309 100%);
+        }
+        
+        .requirements-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .requirement-card {
+            background: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: var(--shadow);
+        }
+        
+        .requirement-card i {
+            font-size: 2rem;
+            color: #2563eb;
+            margin-bottom: 1rem;
+        }
+        
+        .back-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: #2563eb;
+            text-decoration: none;
+            font-weight: 600;
+            margin-bottom: 2rem;
+        }
+        
+        .back-button:hover {
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 768px) {
+            .requirements-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .guide-header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <nav class="navbar">
+                <a href="index.html" class="logo">
+                    <i class="fas fa-globe-americas"></i>
+                    <span>Atlas Interactivo</span>
+                </a>
+                <div class="nav-links">
+                    <a href="index.html">Inicio</a>
+                    <a href="index.html#download">Descargar</a>
+                    <a href="index.html#guide" class="active">Guías</a>
+                    <a href="index.html#faq">FAQ</a>
+                </div>
+                <div class="theme-toggle">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <div class="guide-header">
+        <div class="container">
+            <a href="index.html#guide" class="back-button">
+                <i class="fas fa-arrow-left"></i> Volver a Guías
+            </a>
+            <h1>Guía de Instalación para Windows</h1>
+            <p>Instala Atlas Interactivo en Windows 10/11 de 64-bit. Solo necesitas hacer clic una vez y nuestro instalador hará el resto.</p>
+        </div>
+    </div>
+
+    <div class="guide-content container">
+        <!-- Requisitos -->
+        <div class="step-card">
+            <h2><i class="fas fa-clipboard-check"></i> Requisitos del Sistema</h2>
+            <p>Antes de comenzar, verifica que tu equipo cumple con estos requisitos:</p>
+            
+            <div class="requirements-grid">
+                <div class="requirement-card">
+                    <i class="fas fa-microchip"></i>
+                    <h4>Sistema Operativo</h4>
+                    <p>Windows 10 o 11 (64-bit)</p>
+                </div>
+                <div class="requirement-card">
+                    <i class="fas fa-memory"></i>
+                    <h4>Memoria RAM</h4>
+                    <p>Mínimo 4 GB</p>
+                </div>
+                <div class="requirement-card">
+                    <i class="fas fa-hdd"></i>
+                    <h4>Espacio en Disco</h4>
+                    <p>25 GB libres</p>
+                </div>
+            </div>
+            
+            <div class="tip-box">
+                <i class="fas fa-lightbulb"></i> <strong>Consejo:</strong> Instala en una unidad SSD para mejor rendimiento. Si usas HDD, la primera carga puede ser más lenta.
+            </div>
+        </div>
+
+        <!-- Paso 1 -->
+        <div class="step-card">
+            <div class="step-number">1</div>
+            <h3>Descarga el Instalador</h3>
+            <p>Descarga el archivo <code>AtlasInstaller.exe</code> (5 MB) desde nuestra página principal:</p>
+            
+            <div class="code-block">
+                Tamaño: 5 MB<br>
+                Nombre: AtlasInstaller.exe<br>
+                Tipo: Aplicación Windows
+            </div>
+            
+            <div class="warning-box">
+                <i class="fas fa-shield-alt"></i> <strong>Seguridad:</strong> Windows Defender puede mostrar una advertencia porque el archivo no está firmado. Esto es normal para software de código abierto. Haz clic en "Más información" y luego "Ejecutar de todos modos".
+            </div>
+            
+            <p><strong>Ubicación recomendada:</strong> Descarga el instalador en tu Escritorio o en la carpeta de Descargas para encontrarlo fácilmente.</p>
+        </div>
+
+        <!-- Paso 2 -->
+        <div class="step-card">
+            <div class="step-number">2</div>
+            <h3>Ejecuta el Instalador</h3>
+            <p>Haz doble clic en <code>AtlasInstaller.exe</code> para comenzar.</p>
+            
+            <p><strong>Interfaz del instalador:</strong> Verás una ventana con:</p>
+            <ul>
+                <li>Selector de carpeta de instalación</li>
+                <li>Barra de progreso de descarga</li>
+                <li>Información de espacio disponible</li>
+                <li>Botón "Instalar"</li>
+            </ul>
+            
+            <div class="tip-box">
+                <i class="fas fa-lightbulb"></i> <strong>Consejo:</strong> Si tienes múltiples discos, elige uno con al menos 25 GB libres. Evita instalarlo en <code>C:\Program Files</code> si no tienes permisos de administrador.
+            </div>
+        </div>
+
+        <!-- Paso 3 -->
+        <div class="step-card">
+            <div class="step-number">3</div>
+            <h3>Selecciona Carpeta de Instalación</h3>
+            <p>Elige dónde quieres instalar Atlas Interactivo. Recomendamos:</p>
+            
+            <div class="code-block">
+                C:\Users\[TuUsuario]\AtlasInteractivo\<br>
+                D:\AtlasInteractivo\<br>
+                (Cualquier carpeta con 25 GB libres)
+            </div>
+            
+            <p><strong>El instalador hará lo siguiente:</strong></p>
+            <ol>
+                <li>Creará la carpeta seleccionada</li>
+                <li>Descargará los 20 GB desde Google Drive (resumible)</li>
+                <li>Extraerá automáticamente el archivo .zip</li>
+                <li>Eliminará el archivo .zip para ahorrar espacio</li>
+            </ol>
+            
+            <div class="warning-box">
+                <i class="fas fa-exclamation-triangle"></i> <strong>Importante:</strong> No cierres el instalador durante la descarga. Si se interrumpe, puedes reanudar desde donde quedó.
+            </div>
+        </div>
+
+        <!-- Paso 4 -->
+        <div class="step-card">
+            <div class="step-number">4</div>
+            <h3>Espera la Descarga y Extracción</h3>
+            <p>El proceso puede tomar entre 30 minutos y varias horas dependiendo de tu conexión a Internet.</p>
+            
+            <p><strong>Durante la instalación verás:</strong></p>
+            <ul>
+                <li>Barra de progreso de descarga (20 GB total)</li>
+                <li>Velocidad de descarga en tiempo real</li>
+                <li>Tiempo restante estimado</li>
+                <li>Verificación de integridad de archivos</li>
+            </ul>
+            
+            <div class="tip-box">
+                <i class="fas fa-lightbulb"></i> <strong>Consejo:</strong> Puedes minimizar el instalador y seguir usando tu computadora normalmente. El proceso continúa en segundo plano.
+            </div>
+        </div>
+
+        <!-- Paso 5 -->
+        <div class="step-card">
+            <div class="step-number">5</div>
+            <h3>Finalización y Primer Ejecución</h3>
+            <p>Cuando el instalador termine, verás un mensaje de éxito.</p>
+            
+            <p><strong>Opciones disponibles:</strong></p>
+            <ul>
+                <li><strong>Ejecutar Atlas Interactivo ahora:</strong> Inicia la aplicación inmediatamente</li>
+                <li><strong>Abrir carpeta de instalación:</strong> Muestra dónde se instaló</li>
+                <li><strong>Crear acceso directo en escritorio:</strong> Agrega un icono para fácil acceso</li>
+            </ul>
+            
+            <p><strong>Archivos creados:</strong></p>
+            <div class="code-block">
+                [Carpeta de instalación]/<br>
+                ├── Atlas_Interactivo.exe      # Ejecutable principal<br>
+                ├── assets/                    # 174k+ archivos de mapas<br>
+                ├── .version.json             # Información de versión<br>
+                └── README.txt                # Información básica
+            </div>
+        </div>
+
+        <!-- Solución de Problemas -->
+        <div class="step-card">
+            <h2><i class="fas fa-tools"></i> Solución de Problemas</h2>
+            
+            <div class="faq-item">
+                <div class="faq-question">
+                    <h4>Error: "No hay suficiente espacio en disco"</h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="faq-answer">
+                    <p>Verifica que tengas al menos 25 GB libres. El instalador necesita espacio para:</p>
+                    <ul>
+                        <li>Archivo .zip temporal (20 GB)</li>
+                        <li>Archivos extraídos (20 GB)</li>
+                        <li>Total temporal: 40 GB durante la instalación</li>
+                        <li>Final: Solo 20 GB ocupados</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="faq-item">
+                <div class="faq-question">
+                    <h4>Windows Defender bloquea la descarga</h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="faq-answer">
+                    <p>Solución:</p>
+                    <ol>
+                        <li>Abre "Seguridad de Windows"</li>
+                        <li>Ve a "Protección contra virus y amenazas"</li>
+                        <li>Haz clic en "Historial de protección"</li>
+                        <li>Busca AtlasInstaller.exe y haz clic en "Permitir en dispositivo"</li>
+                    </ol>
+                </div>
+            </div>
+            
+            <div class="faq-item">
+                <div class="faq-question">
+                    <h4>La descarga se interrumpe</h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="faq-answer">
+                    <p>Simplemente ejecuta el instalador nuevamente. Google Drive permite descargas resumibles, por lo que continuará desde donde se detuvo.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actualizaciones -->
+        <div class="step-card">
+            <h2><i class="fas fa-sync-alt"></i> Sistema de Actualizaciones</h2>
+            <p>Atlas Interactivo se actualiza automáticamente. No necesitas volver a descargar 20 GB.</p>
+            
+            <p><strong>Cuando haya una actualización:</strong></p>
+            <ol>
+                <li>La aplicación verificará automáticamente al iniciar</li>
+                <li>Descargará solo los archivos modificados (MBs, no GBs)</li>
+                <li>Aplicará los cambios en segundo plano</li>
+                <li>Te notificará cuando esté lista</li>
+            </ol>
+            
+            <div class="tip-box">
+                <i class="fas fa-lightbulb"></i> <strong>Consejo:</strong> Mantén la aplicación abierta para recibir actualizaciones automáticas. Si la cierras, se actualizará la próxima vez que la abras.
+            </div>
+        </div>
+
+        <!-- Final -->
+        <div class="step-card" style="background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%); text-align: center;">
+            <h2><i class="fas fa-check-circle" style="color: #10b981;"></i> ¡Instalación Completada!</h2>
+            <p style="font-size: 1.2rem;">Ahora puedes explorar el mundo con Atlas Interactivo.</p>
+            
+            <div style="margin: 2rem 0;">
+                <a href="index.html#download" class="btn-primary" style="display: inline-flex;">
+                    <i class="fas fa-download"></i> Descargar para Windows
+                </a>
+            </div>
+            
+            <p><strong>¿Necesitas ayuda?</strong> Visita nuestra <a href="index.html#faq">sección de preguntas frecuentes</a> o contacta a la comunidad.</p>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-logo">
+                    <i class="fas fa-globe-americas"></i>
+                    <span>Atlas Interactivo</span>
+                </div>
+                <p class="footer-tagline">El atlas digital más completo. Gratis y de código abierto.</p>
+                
+                <div class="footer-links">
+                    <a href="index.html">Inicio</a>
+                    <a href="index.html#download">Descargar</a>
+                    <a href="index.html#guide">Guías</a>
+                    <a href="index.html#faq">FAQ</a>
+                    <a href="https://github.com/tuusuario/atlas-distribution" target="_blank">GitHub</a>
+                </div>
+                
+                <div class="footer-copyright">
+                    <p>&copy; 2025 Atlas Interactivo. Guía de instalación para Windows.</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+
+
+    <!-- <script>
+    // Sistema de rutas automático
+    document.addEventListener('DOMContentLoaded', function() {
+        // Detectar si estamos en GitHub Pages o local
+        const isGitHubPages = window.location.hostname.includes('github.io');
+        const isLocal = window.location.protocol === 'file:';
+        
+        // Solo ajustar si es necesario
+        if (isGitHubPages || isLocal) {
+            adjustLinksForStatic();
+        }
+        
+        function adjustLinksForStatic() {
+            // Seleccionar todos los enlaces internos
+            document.querySelectorAll('a[href^="/"]').forEach(link => {
+                const href = link.getAttribute('href');
+                
+                // Solo ajustar enlaces a nuestras páginas
+                if (href === '/' || href === '/index.html') {
+                    link.setAttribute('href', 'index.html');
+                } else if (href === '/guide_windows') {
+                    link.setAttribute('href', 'guide_windows.html');
+                } else if (href === '/guide_linux') {
+                    link.setAttribute('href', 'guide_linux.html');
+                }
+            });
+        }
+    });
+    </script> -->
+
+
+</body>
+</html>

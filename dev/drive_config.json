@@ -1,0 +1,14 @@
+{
+    "drive_config": {
+        "base_folder_id": "TU_ID_DE_CARPETA_DRIVE",
+        "file_ids": {
+            "windows_installer": "ID_AtlasInstaller.exe",
+            "linux_installer": "ID_AtlasInstaller.AppImage",
+            "windows_full": "ID_Atlas_Windows_v1.0.0.zip",
+            "linux_full": "ID_Atlas_Linux_v1.0.0.tar.gz"
+        },
+        "patch_index_url": "https://drive.google.com/uc?id=ID_DEL_INDICE&export=download"
+    },
+    "version": "1.0.0",
+    "last_updated": "2024-01-20"
+}

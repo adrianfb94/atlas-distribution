@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guía de Instalación Linux - Atlas Interactivo</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Estilos específicos para guía Linux */
+        .guide-header {
+            background: linear-gradient(135deg, #f1502f 0%, #c13c20 100%);
+            color: white;
+            padding: 100px 0 60px;
+            margin-top: 70px;
+        }
+        
+        .guide-header h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        
+        .guide-header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            max-width: 800px;
+        }
+        
+        .guide-content {
+            padding: 60px 0;
+        }
+        
+        .step-card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            padding: 2.5rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow);
+            border-left: 6px solid #f1502f;
+        }
+        
+        .step-number {
+            display: inline-block;
+            background: #f1502f;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 40px;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
+        
+        .step-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .code-block {
+            background: var(--bg-secondary);
+            padding: 1.5rem;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            margin: 1rem 0;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+        }
+        
+        .code-block code {
+            display: block;
+            white-space: pre;
+            color: var(--text-color);
+        }
+        
+        .terminal {
+            background: #1a1a1a;
+            color: #00ff00;
+            padding: 1.5rem;
+            border-radius: 10px;
+            font-family: 'Ubuntu Mono', monospace;
+            margin: 1.5rem 0;
+            overflow-x: auto;
+        }
+        
+        .terminal .prompt {
+            color: #00ffff;
+        }
+        
+        .terminal .command {
+            color: #ffffff;
+        }
+        
+        .terminal .comment {
+            color: #888888;
+        }
+        
+        .tip-box {
+            background: linear-gradient(135deg, #fed7d7 0%, #fff5f5 100%);
+            border-left: 4px solid #f1502f;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0;
+        }
+        
+        [data-theme="dark"] .tip-box {
+            background: linear-gradient(135deg, #7b341e 0%, #9c4221 100%);
+        }
+        
+        .warning-box {
+            background: linear-gradient(135deg, #fef3c7 0%, #fffbeb 100%);
+            border-left: 4px solid #f59e0b;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0;
+        }
+        
+        [data-theme="dark"] .warning-box {
+            background: linear-gradient(135deg, #92400e 0%, #b45309 100%);
+        }
+        
+        .distro-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+        
+        .distro-card {
+            background: var(--card-bg);
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+            border: 2px solid var(--border-color);
+            transition: var(--transition);
+        }
+        
+        .distro-card:hover {
+            border-color: #f1502f;
+            transform: translateY(-2px);
+        }
+        
+        .distro-card i {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .ubuntu { color: #e95420; }
+        .debian { color: #d70a53; }
+        .fedora { color: #294172; }
+        .arch { color: #1793d1; }
+        
+        .requirements-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        @media (max-width: 768px) {
+            .requirements-grid,
+            .distro-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        .requirement-card {
+            background: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: var(--shadow);
+        }
+        
+        .requirement-card i {
+            font-size: 2rem;
+            color: #f1502f;
+            margin-bottom: 1rem;
+        }
+        
+        .back-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: #f1502f;
+            text-decoration: none;
+            font-weight: 600;
+            margin-bottom: 2rem;
+        }
+        
+        .back-button:hover {
+            text-decoration: underline;
+        }
+        
+        .cli-instructions {
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            padding: 2rem;
+            margin: 2rem 0;
+        }
+        
+        .cli-step {
+            margin-bottom: 1.5rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .cli-step:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+        }
+        
+        .method-tabs {
+            display: flex;
+            gap: 1rem;
+            margin: 2rem 0;
+            flex-wrap: wrap;
+        }
+        
+        .method-tab {
+            padding: 1rem 1.5rem;
+            background: var(--card-bg);
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+        
+        .method-tab.active {
+            background: #f1502f;
+            border-color: #f1502f;
+            color: white;
+        }
+        
+        .method-content {
+            display: none;
+        }
+        
+        .method-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <nav class="navbar">
+                <a href="index.html" class="logo">
+                    <i class="fas fa-globe-americas"></i>
+                    <span>Atlas Interactivo</span>
+                </a>
+                <div class="nav-links">
+                    <a href="index.html">Inicio</a>
+                    <a href="index.html#download">Descargar</a>
+                    <a href="index.html#guide" class="active">Guías</a>
+                    <a href="index.html#faq">FAQ</a>
+                </div>
+                <div class="theme-toggle">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <div class="guide-header">
+        <div class="container">
+            <a href="index.html#guide" class="back-button">
+                <i class="fas fa-arrow-left"></i> Volver a Guías
+            </a>
+            <h1><i class="fab fa-linux"></i> Guía de Instalación para Linux</h1>
+            <p>Instala Atlas Interactivo en distribuciones Linux usando AppImage. No requiere permisos root ni instalación del sistema.</p>
+        </div>
+    </div>
+
+    <div class="guide-content container">
+        <!-- Distribuciones compatibles -->
+        <div class="step-card">
+            <h2><i class="fas fa-check-circle"></i> Distribuciones Compatibles</h2>
+            <p>Atlas Interactivo funciona en cualquier distribución Linux moderna de 64-bit gracias a AppImage.</p>
+            
+            <div class="distro-grid">
+                <div class="distro-card">
+                    <i class="fab fa-ubuntu ubuntu"></i>
+                    <h4>Ubuntu</h4>
+                    <p>20.04 LTS o superior</p>
+                </div>
+                <div class="distro-card">
+                    <i class="fab fa-debian debian"></i>
+                    <h4>Debian</h4>
+                    <p>11 (Bullseye) o superior</p>
+                </div>
+                <div class="distro-card">
+                    <i class="fab fa-fedora fedora"></i>
+                    <h4>Fedora</h4>
+                    <p>34 o superior</p>
+                </div>
+                <div class="distro-card">
+                    <i class="fab fa-arch-linux arch"></i>
+                    <h4>Arch Linux</h4>
+                    <p>Cualquier versión reciente</p>
+                </div>
+            </div>
+            
+            <div class="code-block">
+                # Verifica tu distribución y versión
+                cat /etc/os-release
+                
+                # Verifica si es 64-bit
+                uname -m
+                # Debe mostrar: x86_64 o aarch64
+            </div>
+        </div>
+
+        <!-- Requisitos -->
+        <div class="step-card">
+            <h2><i class="fas fa-clipboard-check"></i> Requisitos del Sistema</h2>
+            
+            <div class="requirements-grid">
+                <div class="requirement-card">
+                    <i class="fas fa-microchip"></i>
+                    <h4>Arquitectura</h4>
+                    <p>x86_64 (64-bit)</p>
+                </div>
+                <div class="requirement-card">
+                    <i class="fas fa-memory"></i>
+                    <h4>Memoria RAM</h4>
+                    <p>Mínimo 2 GB</p>
+                </div>
+                <div class="requirement-card">
+                    <i class="fas fa-hdd"></i>
+                    <h4>Espacio en Disco</h4>
+                    <p>15 GB libres</p>
+                </div>
+                <div class="requirement-card">
+                    <i class="fas fa-desktop"></i>
+                    <h4>Entorno Gráfico</h4>
+                    <p>GNOME, KDE, XFCE, etc.</p>
+                </div>
+            </div>
+            
+            <div class="tip-box">
+                <i class="fas fa-lightbulb"></i> <strong>Nota sobre AppImage:</strong> No requiere dependencias especiales ni instalación en el sistema. Todo está contenido en un solo archivo ejecutable.
+            </div>
+        </div>
+
+        <!-- Métodos de instalación -->
+        <div class="step-card">
+            <h2><i class="fas fa-download"></i> Métodos de Instalación</h2>
+            <p>Elige el método que prefieras:</p>
+            
+            <div class="method-tabs">
+                <div class="method-tab active" data-method="gui">GUI (Recomendado)</div>
+                <div class="method-tab" data-method="terminal">Terminal</div>
+                <div class="method-tab" data-method="wget">Usando wget</div>
+            </div>
+            
+            <!-- Método GUI -->
+            <div class="method-content active" id="gui-method">
+                <h3><i class="fas fa-mouse-pointer"></i> Método Gráfico (Recomendado)</h3>
+                
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h4>Descarga desde el navegador</h4>
+                        <p>Visita nuestra <a href="index.html#download">página de descargas</a> y haz clic en "Descargar para Linux".</p>
+                    </div>
+                </div>
+                
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h4>Hazlo ejecutable</h4>
+                        <p>Navega a la carpeta de descargas (normalmente <code>~/Descargas</code>), haz clic derecho en <code>AtlasInstaller.AppImage</code> y selecciona:</p>
+                        <div class="code-block">
+                            Propiedades → Permisos → 
+                            ☑ Permitir ejecutar como programa
+                        </div>
+                        <p>O usa el terminal:</p>
+                        <div class="terminal">
+                            <span class="prompt">$</span> <span class="command">cd ~/Descargas</span><br>
+                            <span class="prompt">$</span> <span class="command">chmod +x AtlasInstaller.AppImage</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h4>Ejecuta el instalador</h4>
+                        <p>Doble clic en <code>AtlasInstaller.AppImage</code> o usa el terminal:</p>
+                        <div class="terminal">
+                            <span class="prompt">$</span> <span class="command">./AtlasInstaller.AppImage</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Método Terminal -->
+            <div class="method-content" id="terminal-method">
+                <h3><i class="fas fa-terminal"></i> Método por Terminal</h3>
+                
+                <div class="cli-instructions">
+                    <div class="cli-step">
+                        <h4>1. Abre una terminal</h4>
+                        <p>Presiona <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>T</kbd> o busca "Terminal" en tu menú de aplicaciones.</p>
+                    </div>
+                    
+                    <div class="cli-step">
+                        <h4>2. Navega a la carpeta de descargas</h4>
+                        <div class="terminal">
+                            <span class="prompt">$</span> <span class="command">cd ~/Descargas</span>
+                        </div>
+                    </div>
+                    
+                    <div class="cli-step">
+                        <h4>3. Descarga el instalador</h4>
+                        <div class="terminal">
+                            <span class="prompt">$</span> <span class="command">wget "https://drive.google.com/uc?id=TU_ID_LINUX&export=download" -O AtlasInstaller.AppImage</span><br>
+                            <span class="comment"># Reemplaza TU_ID_LINUX con el ID real de Drive</span>
+                        </div>
+                    </div>
+                    
+                    <div class="cli-step">
+                        <h4>4. Hazlo ejecutable</h4>
+                        <div class="terminal">
+                            <span class="prompt">$</span> <span class="command">chmod +x AtlasInstaller.AppImage</span>
+                        </div>
+                    </div>
+                    
+                    <div class="cli-step">
+                        <h4>5. Ejecuta el instalador</h4>
+                        <div class="terminal">
+                            <span class="prompt">$</span> <span class="command">./AtlasInstaller.AppImage</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Método wget -->
+            <div class="method-content" id="wget-method">
+                <h3><i class="fas fa-file-download"></i> Descarga Directa con wget</h3>
+                
+                <p>Si prefieres un comando único:</p>
+                
+                <div class="terminal">
+                    <span class="comment"># Descarga y ejecuta en un solo comando:</span><br>
+                    <span class="prompt">$</span> <span class="command">cd ~ && wget -O AtlasInstaller.AppImage "URL_DE_DESCARGA" && chmod +x AtlasInstaller.AppImage && ./AtlasInstaller.AppImage</span>
+                </div>
+                
+                <div class="warning-box">
+                    <i class="fas fa-exclamation-triangle"></i> <strong>Seguridad:</strong> Solo descarga de fuentes confiables. Verifica que la URL sea de nuestro sitio oficial.
+                </div>
+            </div>
+        </div>
+
+        <!-- Paso 1: Descarga -->
+        <div class="step-card">
+            <div class="step-number">1</div>
+            <h3>Descarga el AppImage</h3>
+            <p>El archivo <code>AtlasInstaller.AppImage</code> es un ejecutable portable de ~5 MB que contiene todo lo necesario.</p>
+            
+            <div class="code-block">
+                Nombre: AtlasInstaller.AppImage<br>
+                Tamaño: ~5 MB<br>
+                Tipo: AppImage (executable Linux)<br>
+                SHA256: [checksum disponible en la página]
+            </div>
+            
+            <div class="tip-box">
+                <i class="fas fa-shield-alt"></i> <strong>Verificación de integridad:</strong> Después de descargar, puedes verificar el checksum:<br>
+                <div class="terminal">
+                    <span class="prompt">$</span> <span class="command">sha256sum AtlasInstaller.AppImage</span><br>
+                    <span class="comment"># Compara el resultado con el publicado en nuestra página</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Paso 2: Permisos -->
+        <div class="step-card">
+            <div class="step-number">2</div>
+            <h3>Configura Permisos de Ejecución</h3>
+            <p>Linux requiere permisos explícitos para ejecutar archivos. Si usas GUI, haz clic derecho → Propiedades → Permisos.</p>
+            
+            <p><strong>En terminal (recomendado):</strong></p>
+            <div class="terminal">
+                <span class="prompt">$</span> <span class="command">chmod +x AtlasInstaller.AppImage</span><br>
+                <span class="comment"># Esto agrega el permiso de ejecución</span><br><br>
+                
+                <span class="prompt">$</span> <span class="command">ls -la AtlasInstaller.AppImage</span><br>
+                <span class="comment"># Deberías ver: -rwxr-xr-x ... AtlasInstaller.AppImage</span><br>
+                <span class="comment"># La 'x' indica que es ejecutable</span>
+            </div>
+            
+            <div class="warning-box">
+                <i class="fas fa-exclamation-triangle"></i> <strong>Error común:</strong> Si ves "Permiso denegado" al ejecutar, significa que no configuraste los permisos correctamente. Usa <code>chmod +x</code>.
+            </div>
+        </div>
+
+        <!-- Paso 3: Ejecución -->
+        <div class="step-card">
+            <div class="step-number">3</div>
+            <h3>Ejecuta el Instalador</h3>
+            
+            <div class="terminal">
+                <span class="prompt">$</span> <span class="command">./AtlasInstaller.AppImage</span><br>
+                <span class="comment"># El './' es necesario para ejecutar desde el directorio actual</span>
+            </div>
+            
+            <p><strong>Interfaz del instalador:</strong> Verás una ventana con:</p>
+            <ul>
+                <li>Selector de carpeta de instalación</li>
+                <li>Barra de progreso de descarga (13 GB total)</li>
+                <li>Información de espacio disponible</li>
+                <li>Opciones de instalación</li>
+            </ul>
+            
+            <div class="tip-box">
+                <i class="fas fa-lightbulb"></i> <strong>Ubicación recomendada:</strong><br>
+                <code>~/AtlasInteractivo/</code> (en tu carpeta home)<br>
+                <code>~/Apps/AtlasInteractivo/</code> (si tienes carpeta Apps)<br>
+                <code>/opt/AtlasInteractivo/</code> (si quieres acceso global, necesita sudo)
+            </div>
+        </div>
+
+        <!-- Paso 4: Descarga automática -->
+        <div class="step-card">
+            <div class="step-number">4</div>
+            <h3>Descarga Automática del Contenido</h3>
+            <p>El instalador descargará los 13 GB de mapas desde Google Drive. Esto puede tomar tiempo dependiendo de tu conexión.</p>
+            
+            <p><strong>Características de la descarga:</strong></p>
+            <ul>
+                <li><strong>Resumible:</strong> Si se interrumpe, continúa desde donde quedó</li>
+                <li><strong>Verificación:</strong> Checksum de cada archivo descargado</li>
+                <li><strong>Extracción automática:</strong> El .tar.gz se extrae y elimina</li>
+                <li><strong>Optimización de espacio:</strong> Solo ocupa 13 GB finales</li>
+            </ul>
+            
+            <div class="code-block">
+                Proceso interno del instalador:
+                1. Descarga Atlas_Linux_v1.0.0.tar.gz (13 GB)
+                2. Extrae a la carpeta seleccionada
+                3. Verifica integridad de todos los archivos
+                4. Elimina el archivo .tar.gz para ahorrar espacio
+                5. Crea accesos directos y configuración
+            </div>
+        </div>
+
+        <!-- Paso 5: Finalización -->
+        <div class="step-card">
+            <div class="step-number">5</div>
+            <h3>Finalización y Acceso</h3>
+            <p>Cuando termine la instalación, tendrás estas opciones:</p>
+            
+            <div class="code-block">
+                Opciones al finalizar:
+                ✓ Ejecutar Atlas Interactivo ahora
+                ✓ Crear entrada en el menú de aplicaciones
+                ✓ Crear acceso directo en escritorio
+                ✓ Abrir carpeta de instalación
+            </div>
+            
+            <p><strong>Estructura de archivos creada:</strong></p>
+            <div class="terminal">
+                <span class="comment"># Ejemplo de estructura:</span><br>
+                <span class="command">~/AtlasInteractivo/</span><br>
+                <span class="command">├── Atlas_Interactivo          # Ejecutable principal</span><br>
+                <span class="command">├── atlas.desktop             # Entrada para el menú</span><br>
+                <span class="command">├── icon.png                  # Icono de la aplicación</span><br>
+                <span class="command">├── assets/                   # 174k+ archivos de mapas</span><br>
+                <span class="command">├── .version.json            # Información de versión</span><br>
+                <span class="command">└── README                    # Documentación</span>
+            </div>
+            
+            <p><strong>Para ejecutar manualmente:</strong></p>
+            <div class="terminal">
+                <span class="prompt">$</span> <span class="command">~/AtlasInteractivo/Atlas_Interactivo</span><br>
+                <span class="comment"># O usa el acceso creado en el menú de aplicaciones</span>
+            </div>
+        </div>
+
+        <!-- Configuración avanzada -->
+        <div class="step-card">
+            <h2><i class="fas fa-cogs"></i> Configuración Avanzada</h2>
+            
+            <h3>Integración con el Sistema</h3>
+            
+            <div class="cli-instructions">
+                <div class="cli-step">
+                    <h4>Crear enlace simbólico global</h4>
+                    <div class="terminal">
+                        <span class="comment"># Crea un enlace en /usr/local/bin para acceso desde cualquier terminal</span><br>
+                        <span class="prompt">$</span> <span class="command">sudo ln -s ~/AtlasInteractivo/Atlas_Interactivo /usr/local/bin/atlas</span><br>
+                        <span class="prompt">$</span> <span class="command">atlas  # Ahora puedes ejecutar desde cualquier lugar</span>
+                    </div>
+                </div>
+                
+                <div class="cli-step">
+                    <h4>Actualizar el instalador AppImage</h4>
+                    <p>Si necesitas una nueva versión del instalador:</p>
+                    <div class="terminal">
+                        <span class="prompt">$</span> <span class="command">rm AtlasInstaller.AppImage</span><br>
+                        <span class="prompt">$</span> <span class="command">wget "NUEVA_URL" -O AtlasInstaller.AppImage</span><br>
+                        <span class="prompt">$</span> <span class="command">chmod +x AtlasInstaller.AppImage</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Solución de problemas -->
+        <div class="step-card">
+            <h2><i class="fas fa-tools"></i> Solución de Problemas</h2>
+            
+            <div class="faq-item">
+                <div class="faq-question">
+                    <h4>Error: "bash: ./AtlasInstaller.AppImage: Permiso denegado"</h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="faq-answer">
+                    <div class="terminal">
+                        <span class="prompt">$</span> <span class="command">chmod +x AtlasInstaller.AppImage</span><br>
+                        <span class="comment"># Si no funciona, prueba con:</span><br>
+                        <span class="prompt">$</span> <span class="command">sudo chmod +x AtlasInstaller.AppImage</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="faq-item">
+                <div class="faq-question">
+                    <h4>Error: "FUSE: Error al montar AppImage"</h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="faq-answer">
+                    <p>Instala libfuse:</p>
+                    <div class="terminal">
+                        <span class="comment"># Ubuntu/Debian:</span><br>
+                        <span class="prompt">$</span> <span class="command">sudo apt install libfuse2</span><br><br>
+                        
+                        <span class="comment"># Fedora:</span><br>
+                        <span class="prompt">$</span> <span class="command">sudo dnf install fuse</span><br><br>
+                        
+                        <span class="comment"># Arch Linux:</span><br>
+                        <span class="prompt">$</span> <span class="command">sudo pacman -S fuse2</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="faq-item">
+                <div class="faq-question">
+                    <h4>El instalador no se abre (sin errores)</h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="faq-answer">
+                    <p>Ejecuta en terminal para ver mensajes de error:</p>
+                    <div class="terminal">
+                        <span class="prompt">$</span> <span class="command">./AtlasInstaller.AppImage --debug</span><br>
+                        <span class="comment"># O para AppImages en general:</span><br>
+                        <span class="prompt">$</span> <span class="command">./AtlasInstaller.AppImage --appimage-extract-and-run</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="faq-item">
+                <div class="faq-question">
+                    <h4>No hay suficiente espacio en disco</h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="faq-answer">
+                    <div class="terminal">
+                        <span class="comment"># Verifica espacio disponible:</span><br>
+                        <span class="prompt">$</span> <span class="command">df -h ~</span><br><br>
+                        
+                        <span class="comment"># Necesitas al menos 15 GB libres. Para liberar espacio:</span><br>
+                        <span class="prompt">$</span> <span class="command">sudo apt autoremove  # Ubuntu/Debian</span><br>
+                        <span class="prompt">$</span> <span class="command">sudo dnf autoremove  # Fedora</span><br>
+                        <span class="prompt">$</span> <span class="command">sudo pacman -Sc     # Arch</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="faq-item">
+                <div class="faq-question">
+                    <h4>Problemas con SELinux (Fedora/RHEL)</h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="faq-answer">
+                    <div class="terminal">
+                        <span class="comment"># Temporalmente deshabilitar SELinux para la ejecución:</span><br>
+                        <span class="prompt">$</span> <span class="command">./AtlasInstaller.AppImage --appimage-extract</span><br>
+                        <span class="prompt">$</span> <span class="command">cd squashfs-root</span><br>
+                        <span class="prompt">$</span> <span class="command">./AppRun</span><br><br>
+                        
+                        <span class="comment"># O agregar contexto SELinux:</span><br>
+                        <span class="prompt">$</span> <span class="command">sudo chcon -t unconfined_exec_t AtlasInstaller.AppImage</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actualizaciones -->
+        <div class="step-card">
+            <h2><i class="fas fa-sync-alt"></i> Sistema de Actualizaciones</h2>
+            <p>Atlas Interactivo en Linux se actualiza automáticamente:</p>
+            
+            <div class="code-block">
+                Funcionamiento de actualizaciones:
+                1. La aplicación verifica versiones al iniciar
+                2. Descarga solo archivos modificados (MBs, no GBs)
+                3. Aplica parches automáticamente
+                4. Notifica cuando está lista
+            </div>
+            
+            <div class="tip-box">
+                <i class="fas fa-lightbulb"></i> <strong>Actualización manual:</strong> Si necesitas forzar una actualización:<br>
+                <div class="terminal">
+                    <span class="prompt">$</span> <span class="command">~/AtlasInteractivo/Atlas_Interactivo --check-updates</span><br>
+                    <span class="comment"># O elimina .version.json para forzar actualización completa</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Final -->
+        <div class="step-card" style="background: linear-gradient(135deg, #fed7d7 0%, #fff5f5 100%); text-align: center;">
+            <h2><i class="fas fa-check-circle" style="color: #38a169;"></i> ¡Instalación Completada!</h2>
+            <p style="font-size: 1.2rem;">Ahora puedes explorar el mundo con Atlas Interactivo en Linux.</p>
+            
+            <div style="margin: 2rem 0;">
+                <a href="index.html#download" class="btn-primary" style="display: inline-flex; background: #f1502f;">
+                    <i class="fas fa-download"></i> Descargar para Linux
+                </a>
+            </div>
+            
+            <p><strong>¿Necesitas ayuda?</strong> Visita nuestra <a href="index.html#faq">sección de preguntas frecuentes</a> o abre un issue en GitHub.</p>
+            
+            <div class="terminal" style="background: #2d3748; color: white; text-align: left; margin-top: 2rem;">
+                <span class="comment"># Comando final para verificar instalación:</span><br>
+                <span class="prompt">$</span> <span class="command">~/AtlasInteractivo/Atlas_Interactivo --version</span><br>
+                <span class="comment"># Debería mostrar la versión instalada</span>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-logo">
+                    <i class="fas fa-globe-americas"></i>
+                    <span>Atlas Interactivo</span>
+                </div>
+                <p class="footer-tagline">El atlas digital más completo. Gratis y de código abierto.</p>
+                
+                <div class="footer-links">
+                    <a href="index.html">Inicio</a>
+                    <a href="index.html#download">Descargar</a>
+                    <a href="index.html#guide">Guías</a>
+                    <a href="index.html#faq">FAQ</a>
+                    <a href="https://github.com/tuusuario/atlas-distribution" target="_blank">GitHub</a>
+                </div>
+                
+                <div class="footer-copyright">
+                    <p>&copy; 2025 Atlas Interactivo. Guía de instalación para Linux.</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+    <script>
+        // Script específico para la guía Linux
+        document.addEventListener('DOMContentLoaded', function() {
+            // Tabs de métodos de instalación
+            const methodTabs = document.querySelectorAll('.method-tab');
+            const methodContents = document.querySelectorAll('.method-content');
+            
+            methodTabs.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    const method = this.getAttribute('data-method');
+                    
+                    // Actualizar pestañas activas
+                    methodTabs.forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Mostrar contenido correspondiente
+                    methodContents.forEach(content => {
+                        content.classList.remove('active');
+                        if (content.id === `${method}-method`) {
+                            content.classList.add('active');
+                        }
+                    });
+                });
+            });
+            
+            // FAQ interactiva
+            const faqQuestions = document.querySelectorAll('.faq-question');
+            faqQuestions.forEach(question => {
+                question.addEventListener('click', function() {
+                    const faqItem = this.parentElement;
+                    const isActive = faqItem.classList.contains('active');
+                    
+                    // Cerrar todos
+                    document.querySelectorAll('.faq-item').forEach(item => {
+                        item.classList.remove('active');
+                    });
+                    
+                    // Abrir este si no estaba activo
+                    if (!isActive) {
+                        faqItem.classList.add('active');
+                    }
+                });
+            });
+            
+            // Copiar comandos al hacer clic
+            const codeBlocks = document.querySelectorAll('.terminal');
+            codeBlocks.forEach(block => {
+                block.addEventListener('click', function() {
+                    const text = this.innerText;
+                    const commands = text.split('\n')
+                        .filter(line => line.trim() && !line.includes('#'))
+                        .map(line => line.replace(/^\$\s*/, ''))
+                        .join('\n');
+                    
+                    navigator.clipboard.writeText(commands).then(() => {
+                        const original = this.innerHTML;
+                        this.innerHTML = '<span style="color: #00ff00;">✓ Comando copiado al portapapeles</span>';
+                        setTimeout(() => {
+                            this.innerHTML = original;
+                        }, 2000);
+                    });
+                });
+            });
+        });
+    </script>
+
+    <!-- <script>
+    // Sistema de rutas automático
+    document.addEventListener('DOMContentLoaded', function() {
+        // Detectar si estamos en GitHub Pages o local
+        const isGitHubPages = window.location.hostname.includes('github.io');
+        const isLocal = window.location.protocol === 'file:';
+        
+        // Solo ajustar si es necesario
+        if (isGitHubPages || isLocal) {
+            adjustLinksForStatic();
+        }
+        
+        function adjustLinksForStatic() {
+            // Seleccionar todos los enlaces internos
+            document.querySelectorAll('a[href^="/"]').forEach(link => {
+                const href = link.getAttribute('href');
+                
+                // Solo ajustar enlaces a nuestras páginas
+                if (href === '/' || href === '/index.html') {
+                    link.setAttribute('href', 'index.html');
+                } else if (href === '/guide_windows') {
+                    link.setAttribute('href', 'guide_windows.html');
+                } else if (href === '/guide_linux') {
+                    link.setAttribute('href', 'guide_linux.html');
+                }
+            });
+        }
+    });
+    </script> -->
+
+</body>
+</html>
