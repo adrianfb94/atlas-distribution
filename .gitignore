@@ -17,10 +17,10 @@ drive_files/*
 # output/
 # release/
 
-# 3. CÓDIGO FUENTE/DEVELOPMENT (opcional excluir)
-dev/
-# scripts/
-scripts/*
+# # 3. CÓDIGO FUENTE/DEVELOPMENT (opcional excluir)
+# dev/
+# # scripts/
+# scripts/*
 
 # 4. ARCHIVOS TEMPORALES/SISTEMA
 *.tmp
