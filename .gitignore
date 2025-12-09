@@ -3,7 +3,7 @@
 # ============================================
 
 # 1. ARCHIVOS DE DRIVE (13-20GB cada uno)
-drive_files/
+# drive_files/
 drive_files/*
 
 # # 2. ARCHIVOS COMPILADOS/INSTALADORES
@@ -19,7 +19,8 @@ drive_files/*
 
 # 3. CÓDIGO FUENTE/DEVELOPMENT (opcional excluir)
 dev/
-scripts/
+# scripts/
+scripts/*
 
 # 4. ARCHIVOS TEMPORALES/SISTEMA
 *.tmp
