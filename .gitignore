@@ -1,0 +1,43 @@
+# ============================================
+# ARCHIVOS GRANDES - NO SUBIR A GITHUB
+# ============================================
+
+# 1. ARCHIVOS DE DRIVE (13-20GB cada uno)
+drive_files/
+drive_files/*
+
+# # 2. ARCHIVOS COMPILADOS/INSTALADORES
+# *.exe
+# *.AppImage
+# *.msi
+# *.dmg
+# *.bin
+# dist/
+# build/
+# output/
+# release/
+
+# 3. CÓDIGO FUENTE/DEVELOPMENT (opcional excluir)
+dev/
+
+# 4. ARCHIVOS TEMPORALES/SISTEMA
+*.tmp
+*.temp
+*.log
+*.cache
+.DS_Store
+Thumbs.db
+
+# # 5. ENTORNOS VIRTUALES/PAQUETES
+# node_modules/
+# __pycache__/
+# *.pyc
+# .vscode/
+# .idea/
+# venv/
+# env/
+
+# # 6. BACKUPS/VERSIONES VIEJAS
+# *.bak
+# *.old
+# *~
