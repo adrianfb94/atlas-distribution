@@ -19,6 +19,7 @@ drive_files/*
 
 # 3. CÓDIGO FUENTE/DEVELOPMENT (opcional excluir)
 dev/
+scripts/
 
 # 4. ARCHIVOS TEMPORALES/SISTEMA
 *.tmp
