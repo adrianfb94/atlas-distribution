@@ -157,47 +157,6 @@ class PatchSystem:
         return file_name
 
 
-    # def run(self):
-
-    #     """Ejecuta el proceso completo de creación de parches"""
-    #     print(f"\n{'='*60}")
-    #     print(f"🔄 SISTEMA DE PARCHES - {self.platform.upper()}")
-    #     print(f"{'='*60}")
-        
-    #     # 1. Cargar manifest anterior
-    #     old_manifest = self.load_manifest()
-        
-    #     # 2. Crear nuevo manifest
-    #     new_manifest = self.create_manifest()
-        
-    #     # 3. Encontrar cambios
-    #     changes = self.find_changes(old_manifest, new_manifest)
-        
-    #     total_changes = len(changes["new"]) + len(changes["modified"])
-    #     if total_changes == 0:
-    #         print("✅ No hay cambios detectados")
-    #         return
-        
-    #     print(f"📊 Cambios detectados: {total_changes} archivos")
-        
-    #     # 4. Crear parche
-    #     patch_file = self.create_patch(changes)
-        
-    #     if patch_file:
-    #         # 5. Subir a Drive
-    #         self.upload_to_drive(patch_file)
-            
-    #         # 6. Actualizar manifest
-    #         with open(self.manifest_file, 'w') as f:
-    #             json.dump(new_manifest, f, indent=2)
-            
-    #         print(f"\n✅ Manifest actualizado: {self.manifest_file}")
-        
-    #     print(f"{'='*60}")
-        
-    #     return patch_file if 'patch_file' in locals() else None
-
-
 def run(self):
     """Ejecuta el proceso completo de creación de parches"""
     print(f"\n{'='*60}")
