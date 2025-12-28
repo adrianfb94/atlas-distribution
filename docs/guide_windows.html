@@ -8,7 +8,9 @@
     <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"> -->
     <link rel="stylesheet" href="all.min.css">
     <!-- <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"> -->
-    <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" />
+    <!-- <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" /> -->
+    <link rel="icon" href="icons/favicon.png" type="image/svg+xml" />
+
 
     <style>
         .guide-header {
@@ -174,8 +176,10 @@
                 <i class="fas fa-arrow-left"></i> Volver a Guías
             </a>
             <!-- <h1>Guía de Instalación para Windows</h1> -->
-             <h1><i class="fab fa-windows"></i> Guía de Instalación para Windows</h1>
-            <p>Instala Atlas Interactivo en Windows 10/11 de 64-bit. Solo necesitas hacer clic una vez y nuestro instalador hará el resto.</p>
+             <!-- <h1><i class="fab fa-windows"></i> Guía de Instalación para Windows</h1>
+            <p>Instala Atlas Interactivo en Windows 10/11 de 64-bit. Solo necesitas hacer clic una vez y nuestro instalador hará el resto.</p> -->
+            <h1><i class="fab fa-windows"></i> Guía de Instalación para Windows (C# .NET)</h1>
+            <p>Instala Atlas Interactivo en Windows 10/11 usando nuestro instalador C# WinForms. Interfaz nativa de Windows.</p>            
         </div>
     </div>
 
@@ -215,7 +219,7 @@
             <p>Descarga el archivo <code>AtlasInstaller.exe</code> (5 MB) desde nuestra página principal:</p>
             
             <div class="code-block">
-                Tamaño: 5 MB<br>
+                Tamaño: 20 KB<br>
                 Nombre: AtlasInstaller.exe<br>
                 Tipo: Aplicación Windows
             </div>
@@ -304,9 +308,16 @@
             </ul>
             
             <p><strong>Archivos creados:</strong></p>
-            <div class="code-block">
+            <!-- <div class="code-block">
                 [Carpeta de instalación]/<br>
                 ├── Atlas_Interactivo.exe      # Ejecutable principal<br>
+                ├── assets/                    # 174k+ archivos de mapas<br>
+                ├── .version.json             # Información de versión<br>
+                └── README.txt                # Información básica
+            </div> -->
+            <div class="code-block">
+                [Carpeta de instalación]/<br>
+                ├── Atlas_Interactivo.exe      # Ejecutable principal (.NET)<br>
                 ├── assets/                    # 174k+ archivos de mapas<br>
                 ├── .version.json             # Información de versión<br>
                 └── README.txt                # Información básica
@@ -419,36 +430,6 @@
 
     <script src="script.js"></script>
 
-
-    <!-- <script>
-    // Sistema de rutas automático
-    document.addEventListener('DOMContentLoaded', function() {
-        // Detectar si estamos en GitHub Pages o local
-        const isGitHubPages = window.location.hostname.includes('github.io');
-        const isLocal = window.location.protocol === 'file:';
-        
-        // Solo ajustar si es necesario
-        if (isGitHubPages || isLocal) {
-            adjustLinksForStatic();
-        }
-        
-        function adjustLinksForStatic() {
-            // Seleccionar todos los enlaces internos
-            document.querySelectorAll('a[href^="/"]').forEach(link => {
-                const href = link.getAttribute('href');
-                
-                // Solo ajustar enlaces a nuestras páginas
-                if (href === '/' || href === '/index.html') {
-                    link.setAttribute('href', 'index.html');
-                } else if (href === '/guide_windows') {
-                    link.setAttribute('href', 'guide_windows.html');
-                } else if (href === '/guide_linux') {
-                    link.setAttribute('href', 'guide_linux.html');
-                }
-            });
-        }
-    });
-    </script> -->
 
 
 </body>

@@ -8,7 +8,8 @@
     <!-- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"> -->
     <link rel="stylesheet" href="all.min.css" />
     <!-- <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"> -->
-    <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" />
+    <!-- <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" /> -->
+    <link rel="icon" href="icons/favicon.png" type="image/svg+xml" />
   </head>
   <body>
     <!-- Header -->
@@ -122,7 +123,7 @@
             <div class="download-options">
               <button class="btn-primary download-btn" data-platform="windows">
                 <i class="fas fa-download"></i>
-                Descargar AtlasInstaller.exe (5 MB)
+                Descargar AtlasInstaller.exe (20 KB)
               </button>
               <div class="alternative-links">
                 <!-- CORRECCIÓN AQUÍ: Cambiar #windows-guide por /guide_windows -->
@@ -131,7 +132,7 @@
                   <i class="fas fa-book"></i> Guía de instalación
                 </a>
                 <a
-                  href="https://drive.google.com/drive/folders/..."
+                  href="https://drive.google.com/file/d/1X-ZkC1hHNTEivXDoCOZQKgVODeWdN5LW/view?usp=drive_link"
                   class="link"
                   target="_blank"
                 >
@@ -165,7 +166,7 @@
               Para distribuciones basadas en Debian/Ubuntu
             </p>
 
-            <div class="platform-info">
+            <!-- <div class="platform-info">
               <div class="info-item">
                 <i class="fas fa-file-archive"></i>
                 <span>Tamaño completo: <strong>13 GB</strong></span>
@@ -178,12 +179,26 @@
                 <i class="fas fa-bolt"></i>
                 <span>AppImage - No requiere instalación</span>
               </div>
+            </div> -->
+            <div class="platform-info">
+              <div class="info-item">
+                <i class="fas fa-file-archive"></i>
+                <span>Tamaño completo: <strong>13 GB</strong></span>
+              </div>
+              <div class="info-item">
+                <i class="fas fa-microchip"></i>
+                <span>Requisitos: 2GB RAM, 15GB espacio, Qt5</span>
+              </div>
+              <div class="info-item">
+                <i class="fas fa-bolt"></i>
+                <span>Instalador Qt GUI - Interfaz nativa</span>
+              </div>
             </div>
 
             <div class="download-options">
               <button class="btn-primary download-btn" data-platform="linux">
                 <i class="fas fa-download"></i>
-                Descargar AtlasInstaller.AppImage (5 MB)
+                Descargar AtlasInstallerQt (89 KB)
               </button>
               <div class="alternative-links">
                 <!-- CORRECCIÓN AQUÍ: Cambiar #linux-guide por /guide_linux -->
@@ -192,7 +207,7 @@
                   <i class="fas fa-book"></i> Guía de instalación
                 </a>
                 <a
-                  href="https://drive.google.com/drive/folders/..."
+                  href="https://drive.google.com/file/d/1vzAxSaKRXIPSNf937v6xjuBhRyrCiVRF/view?usp=drive_link"
                   class="link"
                   target="_blank"
                 >
@@ -222,7 +237,7 @@
             <i class="fas fa-compress-arrows-alt"></i>
             <h4>Solo descargas lo necesario</h4>
             <p>
-              Instalador pequeño (5MB) que descarga el contenido según tu
+              Instalador pequeño (0.1 MB) que descarga el contenido según tu
               sistema.
             </p>
           </div>
@@ -278,7 +293,7 @@
               <div class="step-content">
                 <h4>Descarga el instalador</h4>
                 <p>
-                  Ejecuta <code>AtlasInstaller.exe</code> (5MB) desde esta
+                  Ejecuta <code>AtlasInstaller.exe</code> (20 KB) desde esta
                   página.
                 </p>
               </div>
@@ -288,7 +303,7 @@
               <div class="step-content">
                 <h4>Selecciona carpeta de instalación</h4>
                 <p>
-                  Elige dóguardar Atlas Interactivo (necesitas 25GB libres).
+                  Elige dónde guardar Atlas Interactivo (necesitas 25GB libres).
                 </p>
               </div>
             </div>
@@ -323,7 +338,7 @@
           </div>
 
           <!-- Linux Steps -->
-          <div class="guide-steps linux-steps">
+          <!-- <div class="guide-steps linux-steps">
             <div class="step">
               <div class="step-number">1</div>
               <div class="step-content">
@@ -367,7 +382,47 @@
                 <p>Se crearán accesos directos en el menú de aplicaciones.</p>
               </div>
             </div>
-          </div>
+          </div> -->
+
+            <div class="guide-steps linux-steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h4>Descarga el instalador Qt</h4>
+                        <p>Descarga <code>AtlasInstallerQt</code> desde esta página.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h4>Hazlo ejecutable</h4>
+                        <p><code>chmod +x AtlasInstallerQt</code></p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h4>Ejecuta el instalador</h4>
+                        <p><code>./AtlasInstallerQt</code> (interfaz gráfica Qt)</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <h4>Descarga automática</h4>
+                        <p>El instalador descargará 13GB desde Google Drive.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">5</div>
+                    <div class="step-content">
+                        <h4>Extracción y limpieza</h4>
+                        <p>Se extrae el archivo .tar y se elimina automáticamente.</p>
+                    </div>
+                </div>
+            </div>
+
+
         </div>
 
         <div class="guide-actions">
@@ -457,7 +512,7 @@
             <div class="faq-answer">
               <p>
                 <strong>NO.</strong> Nuestro instalador extrae y elimina el
-                archivo .zip/.tar.gz automáticamente. Solo necesitas el espacio
+                archivo .zip/.tar automáticamente. Solo necesitas el espacio
                 final (20GB para Windows, 13GB para Linux).
               </p>
             </div>
@@ -579,35 +634,5 @@
     <!-- Scripts -->
     <script src="script.js"></script>
     <script src="download.js"></script>
-
-    <!-- <script>
-    // Sistema de rutas automático
-    document.addEventListener('DOMContentLoaded', function() {
-        // Detectar si estamos en GitHub Pages o local
-        const isGitHubPages = window.location.hostname.includes('github.io');
-        const isLocal = window.location.protocol === 'file:';
-        
-        // Solo ajustar si es necesario
-        if (isGitHubPages || isLocal) {
-            adjustLinksForStatic();
-        }
-        
-        function adjustLinksForStatic() {
-            // Seleccionar todos los enlaces internos
-            document.querySelectorAll('a[href^="/"]').forEach(link => {
-                const href = link.getAttribute('href');
-                
-                // Solo ajustar enlaces a nuestras páginas
-                if (href === '/' || href === '/index.html') {
-                    link.setAttribute('href', 'index.html');
-                } else if (href === '/guide_windows') {
-                    link.setAttribute('href', 'guide_windows.html');
-                } else if (href === '/guide_linux') {
-                    link.setAttribute('href', 'guide_linux.html');
-                }
-            });
-        }
-    });
-    </script> -->
   </body>
 </html>

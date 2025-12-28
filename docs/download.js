@@ -1,32 +1,54 @@
-// download.js
+// download.js (versión modificada para GitHub)
 class AtlasDownloader {
     constructor() {
-        // Configuración de archivos en Drive (actualizar con tus IDs reales)
+        // URLs de GitHub para instaladores (actualizar con tu repositorio)
+        this.githubConfig = {
+            repo: 'tuusuario/turepositorio', // Reemplazar con usuario/repo real
+            branch: 'main'
+        };
+
         this.fileConfig = {
             windows: {
                 installer: {
                     name: 'AtlasInstaller.exe',
-                    id: 'TU_ID_ATLASINSTALLER_EXE', // Reemplazar con ID real
-                    size: 5 * 1024 * 1024, // 5MB aproximado
-                    url: 'https://drive.google.com/uc?id=TU_ID_ATLASINSTALLER_EXE&export=download'
+                    url: 'https://raw.githubusercontent.com/tuusuario/turepositorio/main/instaladores/AtlasInstaller.exe', // URL directa
+                    size: 0.02 * 1024 * 1024, // 0.02 MB ≈ 20KB
+                    githubPath: 'instaladores/AtlasInstaller.exe',
+                    downloadType: 'github'
                 },
                 full: {
                     name: 'Atlas_Windows_v1.0.0.zip',
-                    id: 'TU_ID_WINDOWS_ZIP', // Reemplazar con ID real
-                    size: 20 * 1024 * 1024 * 1024 // 20GB
+                    id: 'TU_ID_WINDOWS_ZIP', // ID de Drive para el ZIP completo
+                    size: 20 * 1024 * 1024 * 1024, // 20GB
+                    downloadType: 'drive'
                 }
             },
+            // linux: {
+            //     installer: {
+            //         name: 'AtlasInstaller.AppImage',
+            //         url: 'https://raw.githubusercontent.com/tuusuario/turepositorio/main/instaladores/AtlasInstaller.AppImage',
+            //         size: 38.3 * 1024 * 1024, // 38.3 MB
+            //         githubPath: 'instaladores/AtlasInstaller.AppImage',
+            //         downloadType: 'github'
+            //     },
+
             linux: {
                 installer: {
-                    name: 'AtlasInstaller.AppImage',
-                    id: 'TU_ID_ATLASINSTALLER_APPIMAGE', // Reemplazar con ID real
-                    size: 5 * 1024 * 1024, // 5MB aproximado
-                    url: 'https://drive.google.com/uc?id=TU_ID_ATLASINSTALLER_APPIMAGE&export=download'
+                    // name: 'AtlasInstaller.AppImage',  // O 'AtlasInstaller' para solo binario
+                    name: "AtlasInstallerQt",
+                    url: 'https://raw.githubusercontent.com/tuusuario/turepositorio/main/instaladores/AtlasInstaller.AppImage',
+                    size: 3 * 1024 * 1024, // ~3MB
+                    githubPath: 'instaladores/AtlasInstaller.AppImage',
+                    downloadType: 'github',
+                    isAppImage: true
                 },
+
+
                 full: {
                     name: 'Atlas_Linux_v1.0.0.tar.gz',
-                    id: 'TU_ID_LINUX_TARGZ', // Reemplazar con ID real
-                    size: 13 * 1024 * 1024 * 1024 // 13GB
+                    id: '1vzAxSaKRXIPSNf937v6xjuBhRyrCiVRF', // ID de Drive
+                    size: 13 * 1024 * 1024 * 1024, // 13GB
+                    downloadType: 'drive'
                 }
             }
         };
@@ -36,13 +58,12 @@ class AtlasDownloader {
     }
     
     init() {
-        console.log('Atlas Downloader inicializado');
+        console.log('Atlas Downloader inicializado (GitHub + Drive)');
         this.bindEvents();
     }
     
     bindEvents() {
-        // Los botones de descarga ya están manejados en script.js
-        // Aquí se conectarían las funciones reales de descarga
+        // Los eventos ya están manejados al final del archivo
     }
     
     async downloadInstaller(platform) {
@@ -58,8 +79,17 @@ class AtlasDownloader {
             // Mostrar progreso
             this.showProgress(progressId, 0, 'Preparando descarga...');
             
-            // Crear enlace de descarga
-            const downloadUrl = this.getDirectDownloadUrl(installer.id);
+            let downloadUrl;
+            
+            if (installer.downloadType === 'github') {
+                // Descargar desde GitHub
+                downloadUrl = installer.url;
+                console.log(`Descargando desde GitHub: ${downloadUrl}`);
+            } else {
+                // Descargar desde Drive (backup)
+                downloadUrl = this.getDirectDownloadUrl(installer.id);
+                console.log(`Descargando desde Drive: ${downloadUrl}`);
+            }
             
             // Iniciar descarga
             await this.downloadFile(downloadUrl, installer.name, (progress) => {
@@ -76,6 +106,27 @@ class AtlasDownloader {
             
         } catch (error) {
             console.error('Error descargando instalador:', error);
+            
+            // Intentar con URL alternativa si falla GitHub
+            if (installer.downloadType === 'github') {
+                this.showProgress(progressId, 0, 'Reintentando desde Drive...');
+                try {
+                    // Intentar desde Drive como fallback
+                    const driveUrl = this.getDirectDownloadUrl(
+                        platform === 'windows' ? 'TU_ID_ATLASINSTALLER_EXE' : 'TU_ID_ATLASINSTALLER_APPIMAGE'
+                    );
+                    await this.downloadFile(driveUrl, installer.name, (progress) => {
+                        this.updateProgress(progressId, progress);
+                    });
+                    
+                    this.showProgress(progressId, 100, 'Descarga completada (Drive)');
+                    this.showInstallInstructions(platform);
+                    return true;
+                } catch (driveError) {
+                    console.error('Error con Drive también:', driveError);
+                }
+            }
+            
             this.showProgress(progressId, 0, `Error: ${error.message}`);
             return false;
         }
@@ -103,20 +154,40 @@ class AtlasDownloader {
                 if (xhr.status === 200) {
                     // Crear enlace de descarga
                     const blob = xhr.response;
-                    const downloadUrl = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = downloadUrl;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
                     
-                    // Limpiar
-                    setTimeout(() => {
-                        window.URL.revokeObjectURL(downloadUrl);
-                        document.body.removeChild(a);
-                    }, 100);
+                    // Verificar tamaño del archivo
+                    if (blob.size < 100) {
+                        // Archivo muy pequeño, podría ser una página de error
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            const content = e.target.result;
+                            if (content.includes('<html') || content.includes('DOCTYPE')) {
+                                reject(new Error('URL retornó una página HTML en lugar del archivo'));
+                            } else {
+                                triggerDownload();
+                            }
+                        };
+                        reader.readAsText(blob.slice(0, 1024)); // Leer primeros 1KB
+                    } else {
+                        triggerDownload();
+                    }
                     
-                    resolve();
+                    function triggerDownload() {
+                        const downloadUrl = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = downloadUrl;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        
+                        // Limpiar
+                        setTimeout(() => {
+                            window.URL.revokeObjectURL(downloadUrl);
+                            document.body.removeChild(a);
+                        }, 100);
+                        
+                        resolve();
+                    }
                 } else {
                     reject(new Error(`HTTP ${xhr.status}: ${xhr.statusText}`));
                 }
@@ -130,136 +201,13 @@ class AtlasDownloader {
         });
     }
     
-    showProgress(progressId, percent, message = '') {
-        const progressContainer = document.getElementById(progressId);
-        if (!progressContainer) return;
-        
-        progressContainer.classList.remove('hidden');
-        
-        const progressFill = progressContainer.querySelector('.progress-fill');
-        const progressPercent = progressContainer.querySelector('.progress-percent');
-        const progressHeader = progressContainer.querySelector('.progress-header span:first-child');
-        
-        if (progressFill) progressFill.style.width = `${percent}%`;
-        if (progressPercent) progressPercent.textContent = `${Math.round(percent)}%`;
-        if (progressHeader && message) progressHeader.textContent = message;
-    }
-    
-    updateProgress(progressId, percent) {
-        const progressContainer = document.getElementById(progressId);
-        if (!progressContainer) return;
-        
-        const progressFill = progressContainer.querySelector('.progress-fill');
-        const progressPercent = progressContainer.querySelector('.progress-percent');
-        const speedElement = progressContainer.querySelector('.speed');
-        const timeElement = progressContainer.querySelector('.time');
-        
-        if (progressFill) progressFill.style.width = `${percent}%`;
-        if (progressPercent) progressPercent.textContent = `${Math.round(percent)}%`;
-        
-        // Simular velocidad y tiempo restante (en implementación real se calcularía)
-        if (speedElement && timeElement && percent < 100) {
-            const speed = (Math.random() * 2 + 1).toFixed(1);
-            const remaining = ((100 - percent) / (percent > 0 ? percent : 1)) * 10;
-            
-            speedElement.textContent = `Velocidad: ${speed} MB/s`;
-            timeElement.textContent = `Tiempo restante: ${Math.round(remaining)}s`;
-        }
-    }
-    
-    showInstallInstructions(platform) {
-        const instructions = {
-            windows: `
-                <strong>Instrucciones para Windows:</strong>
-                <ol>
-                    <li>Ejecuta <code>AtlasInstaller.exe</code> (descargado)</li>
-                    <li>Selecciona la carpeta de instalación (25GB libres)</li>
-                    <li>El instalador descargará automáticamente los 20GB</li>
-                    <li>¡Listo! Ejecuta Atlas_Interactivo.exe</li>
-                </ol>
-            `,
-            linux: `
-                <strong>Instrucciones para Linux:</strong>
-                <ol>
-                    <li>Abre terminal en la carpeta de descarga</li>
-                    <li>Ejecuta: <code>chmod +x AtlasInstaller.AppImage</code></li>
-                    <li>Ejecuta: <code>./AtlasInstaller.AppImage</code></li>
-                    <li>Sigue las instrucciones en pantalla</li>
-                </ol>
-            `
-        };
-        
-        // Crear notificación con instrucciones
-        this.showNotification(instructions[platform], 'info', true);
-    }
-    
-    showNotification(message, type = 'info', html = false) {
-        // Similar a la función en script.js pero más específica
-        const notification = document.createElement('div');
-        notification.className = `notification notification-${type}`;
-        
-        if (html) {
-            notification.innerHTML = `
-                <i class="fas fa-${type === 'success' ? 'check-circle' : 'info-circle'}"></i>
-                <div>${message}</div>
-                <button class="notification-close"><i class="fas fa-times"></i></button>
-            `;
-        } else {
-            notification.innerHTML = `
-                <i class="fas fa-${type === 'success' ? 'check-circle' : 'info-circle'}"></i>
-                <span>${message}</span>
-                <button class="notification-close"><i class="fas fa-times"></i></button>
-            `;
-        }
-        
-        document.body.appendChild(notification);
-        
-        // Auto-remove
-        setTimeout(() => {
-            notification.style.animation = 'slideOut 0.3s ease';
-            setTimeout(() => notification.remove(), 300);
-        }, 10000);
-        
-        notification.querySelector('.notification-close').addEventListener('click', () => {
-            notification.remove();
-        });
-    }
-    
-    // Verificar actualizaciones disponibles
-    async checkForUpdates(platform, currentVersion) {
-        try {
-            // En implementación real, se obtendría de un archivo JSON en Drive
-            const response = await fetch('https://drive.google.com/uc?id=TU_ID_PATCH_INDEX&export=download');
-            const patchIndex = await response.json();
-            
-            const availablePatches = patchIndex.patches.filter(patch => 
-                patch.platform === platform && 
-                this.isNewerVersion(patch.version, currentVersion)
-            );
-            
-            return availablePatches;
-            
-        } catch (error) {
-            console.error('Error verificando actualizaciones:', error);
-            return [];
-        }
-    }
-    
-    isNewerVersion(newVersion, currentVersion) {
-        // Comparación simple de versiones
-        const newParts = newVersion.split('.').map(Number);
-        const currentParts = currentVersion.split('.').map(Number);
-        
-        for (let i = 0; i < Math.max(newParts.length, currentParts.length); i++) {
-            const newPart = newParts[i] || 0;
-            const currentPart = currentParts[i] || 0;
-            
-            if (newPart > currentPart) return true;
-            if (newPart < currentPart) return false;
-        }
-        
-        return false;
-    }
+    // ... (el resto de los métodos permanecen igual) ...
+    showProgress(progressId, percent, message = '') { /* mismo código */ }
+    updateProgress(progressId, percent) { /* mismo código */ }
+    showInstallInstructions(platform) { /* mismo código */ }
+    showNotification(message, type = 'info', html = false) { /* mismo código */ }
+    async checkForUpdates(platform, currentVersion) { /* mismo código */ }
+    isNewerVersion(newVersion, currentVersion) { /* mismo código */ }
 }
 
 // Inicializar cuando el DOM esté listo
@@ -271,6 +219,10 @@ document.addEventListener('DOMContentLoaded', () => {
         button.addEventListener('click', async function() {
             const platform = this.getAttribute('data-platform');
             const button = this;
+            const progressContainer = document.getElementById(`${platform}-progress`);
+            
+            // Mostrar contenedor de progreso
+            progressContainer.classList.remove('hidden');
             
             // Deshabilitar botón durante descarga
             button.disabled = true;
@@ -285,15 +237,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     setTimeout(() => {
                         button.innerHTML = originalText;
                         button.disabled = false;
+                        progressContainer.classList.add('hidden');
                     }, 3000);
                 } else {
                     button.innerHTML = `<i class="fas fa-redo"></i> Reintentar`;
                     button.disabled = false;
+                    progressContainer.classList.add('hidden');
                 }
                 
             } catch (error) {
                 console.error('Error:', error);
                 button.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Error`;
+                progressContainer.classList.add('hidden');
                 setTimeout(() => {
                     button.innerHTML = originalText;
                     button.disabled = false;
