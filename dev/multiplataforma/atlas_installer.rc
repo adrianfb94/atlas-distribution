@@ -1,0 +1,34 @@
+#include <windows.h>
+
+// Icono de la aplicación
+IDI_ICON1 ICON DISCARDABLE "icons/windows_icon.ico"
+
+// Información de versión
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     1,0,0,0
+PRODUCTVERSION  1,0,0,0
+FILEFLAGSMASK   0x3fL
+FILEFLAGS       0x0L
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"
+        BEGIN
+            VALUE "CompanyName", "Atlas Interactivo"
+            VALUE "FileDescription", "Instalador de Atlas Interactivo"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "AtlasInstaller"
+            VALUE "LegalCopyright", "© 2024 Atlas Interactivo Team"
+            VALUE "OriginalFilename", "AtlasInstaller.exe"
+            VALUE "ProductName", "Atlas Interactivo"
+            VALUE "ProductVersion", "1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1252
+    END
+END

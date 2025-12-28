@@ -1,712 +1,623 @@
-// Atlas_Distribution/dev/AtlasInstaller.cs
 using System;
 using System.IO;
 using System.Net;
-using System.Diagnostics;
-using System.IO.Compression;
 using System.Windows.Forms;
-using System.Drawing;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
-using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Runtime.InteropServices;
+using System.IO.Compression;
 
 namespace AtlasInstaller
 {
     public partial class MainForm : Form
     {
-        // Configuración
-        private const string DRIVE_FILE_ID = "1YOUR_FILE_ID_HERE"; // ID del ZIP en Drive
-        private const string PATCHES_FOLDER_ID = "1YOUR_PATCHES_FOLDER_ID";
-        private const string VERSION_FILE = ".atlas_version.json";
-        
-        // UI Elements
-        private ProgressBar progressBar;
-        private Label lblStatus;
-        private Label lblSpeed;
-        private Label lblTimeRemaining;
-        private Button btnInstall;
-        private Button btnCheckUpdates;
-        private Button btnBrowse;
-        private TextBox txtInstallPath;
-        private CheckBox chkCreateDesktopShortcut;
-        private CheckBox chkCreateStartMenu;
-        private Panel panelMain;
-        private Panel panelComplete;
-        private WebClient webClient;
-        private DateTime startTime;
-        
-        // Paths
-        private string tempZipPath;
-        private string installPath;
-        private bool isInstalled = false;
+        // Para detectar si estamos en Windows o Linux/Mono
+        private bool IsWindows = Environment.OSVersion.Platform == PlatformID.Win32NT;
         
         public MainForm()
         {
             InitializeComponent();
-            SetupUI();
-            
-            // Configurar paths
-            tempZipPath = Path.Combine(Path.GetTempPath(), $"atlas_temp_{Guid.NewGuid()}.zip");
-            installPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Atlas_Interactivo");
-            txtInstallPath.Text = installPath;
-            
-            // Verificar si ya está instalado
-            CheckIfInstalled();
+            SetupModernUI();
         }
-        
-        private void SetupUI()
+
+        private void SetupModernUI()
         {
-            // Configurar ventana
-            this.Text = "Atlas Interactivo - Instalador";
-            this.Size = new Size(600, 500);
-            this.StartPosition = FormStartPosition.CenterScreen;
+            // Configuración moderna de la interfaz
+            this.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
             this.BackColor = Color.FromArgb(240, 240, 240);
             
-            // Panel principal
-            panelMain = new Panel();
-            panelMain.Dock = DockStyle.Fill;
-            panelMain.Padding = new Padding(20);
+            // Hacer la ventana redimensionable solo en Windows
+            // En Linux con Mono, Sizable puede causar problemas
+            this.FormBorderStyle = IsWindows ? FormBorderStyle.Sizable : FormBorderStyle.FixedDialog;
+            this.MaximizeBox = IsWindows;
+            this.MinimizeBox = true;
             
-            // Título
-            var lblTitle = new Label();
-            lblTitle.Text = "🌍 Atlas Interactivo";
-            lblTitle.Font = new Font("Segoe UI", 24, FontStyle.Bold);
+            // Configurar tamaño inicial - VERSIÓN SIMPLIFICADA
+            if (IsWindows)
+            {
+                // Solo en Windows usar Screen.PrimaryScreen
+                try
+                {
+                    Rectangle screen = Screen.PrimaryScreen.WorkingArea;
+                    this.Width = (int)(screen.Width * 0.5);
+                    this.Height = (int)(screen.Height * 0.6);
+                }
+                catch
+                {
+                    // Fallback a tamaño fijo
+                    this.Width = 600;
+                    this.Height = 400;
+                }
+            }
+            else
+            {
+                // En Linux, tamaño fijo pero más grande
+                this.Width = 600;
+                this.Height = 400;
+            }
+            
+            // Centrar ventana
+            this.StartPosition = FormStartPosition.CenterScreen;
+            
+            // Configurar colores y estilos
+            lblTitle.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point);
             lblTitle.ForeColor = Color.FromArgb(44, 62, 80);
-            lblTitle.AutoSize = true;
-            lblTitle.Location = new Point(20, 20);
             
-            var lblSubtitle = new Label();
-            lblSubtitle.Text = "Software meteorológico profesional";
-            lblSubtitle.Font = new Font("Segoe UI", 10);
-            lblSubtitle.ForeColor = Color.Gray;
-            lblSubtitle.AutoSize = true;
-            lblSubtitle.Location = new Point(22, 60);
+            lblStatus.Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+            lblStatus.ForeColor = Color.FromArgb(127, 140, 141);
             
-            // Ruta de instalación
-            var lblPath = new Label();
-            lblPath.Text = "Ruta de instalación:";
-            lblPath.Font = new Font("Segoe UI", 9);
-            lblPath.AutoSize = true;
-            lblPath.Location = new Point(20, 100);
+            lblProgress.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            lblProgress.ForeColor = Color.FromArgb(52, 152, 219);
             
-            txtInstallPath = new TextBox();
-            txtInstallPath.Size = new Size(350, 25);
-            txtInstallPath.Location = new Point(20, 125);
-            txtInstallPath.Font = new Font("Segoe UI", 9);
+            progressBar.BackColor = Color.FromArgb(236, 240, 241);
+            progressBar.ForeColor = Color.FromArgb(52, 152, 219);
             
-            btnBrowse = new Button();
-            btnBrowse.Text = "Examinar...";
-            btnBrowse.Size = new Size(80, 25);
-            btnBrowse.Location = new Point(380, 125);
-            btnBrowse.Font = new Font("Segoe UI", 9);
-            btnBrowse.Click += BtnBrowse_Click;
+            btnCancel.BackColor = Color.FromArgb(231, 76, 60);
+            btnCancel.ForeColor = Color.White;
+            btnCancel.FlatStyle = FlatStyle.Flat;
+            btnCancel.FlatAppearance.BorderSize = 0;
             
-            // Opciones
-            chkCreateDesktopShortcut = new CheckBox();
-            chkCreateDesktopShortcut.Text = "Crear acceso directo en el escritorio";
-            chkCreateDesktopShortcut.Checked = true;
-            chkCreateDesktopShortcut.AutoSize = true;
-            chkCreateDesktopShortcut.Location = new Point(20, 160);
-            chkCreateDesktopShortcut.Font = new Font("Segoe UI", 9);
-            
-            chkCreateStartMenu = new CheckBox();
-            chkCreateStartMenu.Text = "Agregar al menú Inicio";
-            chkCreateStartMenu.Checked = true;
-            chkCreateStartMenu.AutoSize = true;
-            chkCreateStartMenu.Location = new Point(20, 185);
-            chkCreateStartMenu.Font = new Font("Segoe UI", 9);
-            
-            // Barra de progreso
-            progressBar = new ProgressBar();
-            progressBar.Size = new Size(440, 30);
-            progressBar.Location = new Point(20, 230);
-            progressBar.Style = ProgressBarStyle.Continuous;
-            
-            // Labels de estado
-            lblStatus = new Label();
-            lblStatus.Text = "Listo para instalar";
-            lblStatus.AutoSize = true;
-            lblStatus.Location = new Point(20, 270);
-            lblStatus.Font = new Font("Segoe UI", 9);
-            
-            lblSpeed = new Label();
-            lblSpeed.Text = "";
-            lblSpeed.AutoSize = true;
-            lblSpeed.Location = new Point(20, 295);
-            lblSpeed.Font = new Font("Segoe UI", 8);
-            lblSpeed.ForeColor = Color.Gray;
-            
-            lblTimeRemaining = new Label();
-            lblTimeRemaining.Text = "";
-            lblTimeRemaining.AutoSize = true;
-            lblTimeRemaining.Location = new Point(200, 295);
-            lblTimeRemaining.Font = new Font("Segoe UI", 8);
-            lblTimeRemaining.ForeColor = Color.Gray;
-            
-            // Botones
-            btnInstall = new Button();
-            btnInstall.Text = "Instalar Atlas";
-            btnInstall.Size = new Size(150, 40);
-            btnInstall.Location = new Point(20, 330);
-            btnInstall.Font = new Font("Segoe UI", 10, FontStyle.Bold);
-            btnInstall.BackColor = Color.FromArgb(52, 152, 219);
-            btnInstall.ForeColor = Color.White;
-            btnInstall.FlatStyle = FlatStyle.Flat;
-            btnInstall.Click += BtnInstall_Click;
-            
-            btnCheckUpdates = new Button();
-            btnCheckUpdates.Text = "Buscar Actualizaciones";
-            btnCheckUpdates.Size = new Size(150, 40);
-            btnCheckUpdates.Location = new Point(180, 330);
-            btnCheckUpdates.Font = new Font("Segoe UI", 9);
-            btnCheckUpdates.Enabled = false;
-            btnCheckUpdates.Click += BtnCheckUpdates_Click;
-            
-            // Panel de completado
-            panelComplete = new Panel();
-            panelComplete.Dock = DockStyle.Fill;
-            panelComplete.Visible = false;
-            
-            var lblComplete = new Label();
-            lblComplete.Text = "✅ ¡Instalación Completada!";
-            lblComplete.Font = new Font("Segoe UI", 24, FontStyle.Bold);
-            lblComplete.ForeColor = Color.FromArgb(39, 174, 96);
-            lblComplete.AutoSize = true;
-            lblComplete.Location = new Point(150, 100);
-            
-            var lblCompletePath = new Label();
-            lblCompletePath.Text = $"Atlas se ha instalado en:\n{installPath}";
-            lblCompletePath.Font = new Font("Segoe UI", 10);
-            lblCompletePath.AutoSize = false;
-            lblCompletePath.Size = new Size(400, 60);
-            lblCompletePath.Location = new Point(100, 180);
-            lblCompletePath.TextAlign = ContentAlignment.MiddleCenter;
-            
-            var btnLaunch = new Button();
-            btnLaunch.Text = "🎯 Ejecutar Atlas";
-            btnLaunch.Size = new Size(200, 50);
-            btnLaunch.Location = new Point(200, 250);
-            btnLaunch.Font = new Font("Segoe UI", 11, FontStyle.Bold);
-            btnLaunch.BackColor = Color.FromArgb(46, 204, 113);
-            btnLaunch.ForeColor = Color.White;
-            btnLaunch.FlatStyle = FlatStyle.Flat;
-            btnLaunch.Click += (s, e) => LaunchAtlas();
-            
-            var btnOpenFolder = new Button();
-            btnOpenFolder.Text = "📁 Abrir Carpeta";
-            btnOpenFolder.Size = new Size(200, 40);
-            btnOpenFolder.Location = new Point(200, 310);
-            btnOpenFolder.Font = new Font("Segoe UI", 9);
-            btnOpenFolder.Click += (s, e) => Process.Start("explorer.exe", installPath);
-            
-            panelComplete.Controls.AddRange(new Control[] { lblComplete, lblCompletePath, btnLaunch, btnOpenFolder });
-            
-            // Agregar controles al panel principal
-            panelMain.Controls.AddRange(new Control[] {
-                lblTitle, lblSubtitle, lblPath, txtInstallPath, btnBrowse,
-                chkCreateDesktopShortcut, chkCreateStartMenu,
-                progressBar, lblStatus, lblSpeed, lblTimeRemaining,
-                btnInstall, btnCheckUpdates
-            });
-            
-            this.Controls.Add(panelMain);
-            this.Controls.Add(panelComplete);
-        }
-        
-        private void BtnBrowse_Click(object sender, EventArgs e)
-        {
-            using (var dialog = new FolderBrowserDialog())
+            // Solo configurar resize en Windows
+            if (IsWindows)
             {
-                dialog.Description = "Selecciona la carpeta para instalar Atlas";
-                dialog.SelectedPath = txtInstallPath.Text;
-                
-                if (dialog.ShowDialog() == DialogResult.OK)
-                {
-                    installPath = dialog.SelectedPath;
-                    txtInstallPath.Text = installPath;
-                }
+                this.Resize += MainForm_Resize;
             }
         }
-        
-        private void CheckIfInstalled()
+
+        private async void MainForm_Load(object sender, EventArgs e)
         {
-            string versionFile = Path.Combine(installPath, VERSION_FILE);
-            if (File.Exists(versionFile))
+            lblStatus.Text = "Preparando instalación...";
+            
+            // Verificar espacio en disco (versión simplificada)
+            if (!CheckDiskSpace())
             {
-                isInstalled = true;
-                btnInstall.Text = "Reparar Instalación";
-                btnCheckUpdates.Enabled = true;
-                lblStatus.Text = "Atlas ya está instalado. Puedes reparar o actualizar.";
-            }
-        }
-        
-        private async void BtnInstall_Click(object sender, EventArgs e)
-        {
-            btnInstall.Enabled = false;
-            btnBrowse.Enabled = false;
-            progressBar.Value = 0;
-            startTime = DateTime.Now;
-            
-            try
-            {
-                // 1. Verificar espacio
-                if (!CheckDiskSpace())
-                {
-                    MessageBox.Show("Espacio en disco insuficiente. Se requieren al menos 25GB libres.",
-                                  "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-                
-                // 2. Crear directorio
-                Directory.CreateDirectory(installPath);
-                
-                // 3. Descargar
-                await DownloadFileAsync();
-                
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error durante la instalación: {ex.Message}", 
-                              "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                btnInstall.Enabled = true;
-                btnBrowse.Enabled = true;
-            }
-        }
-        
-        private bool CheckDiskSpace()
-        {
-            DriveInfo drive = new DriveInfo(Path.GetPathRoot(installPath));
-            long freeSpace = drive.AvailableFreeSpace;
-            long requiredSpace = 25L * 1024 * 1024 * 1024; // 25GB
-            
-            return freeSpace >= requiredSpace;
-        }
-        
-        private async Task DownloadFileAsync()
-        {
-            lblStatus.Text = "Conectando con Google Drive...";
-            
-            webClient = new WebClient();
-            webClient.DownloadProgressChanged += WebClient_DownloadProgressChanged;
-            webClient.DownloadFileCompleted += WebClient_DownloadFileCompleted;
-            
-            string url = $"https://drive.google.com/uc?id={DRIVE_FILE_ID}&export=download&confirm=t";
-            
-            await webClient.DownloadFileTaskAsync(new Uri(url), tempZipPath);
-        }
-        
-        private void WebClient_DownloadProgressChanged(object sender, DownloadProgressChangedEventArgs e)
-        {
-            // Actualizar progreso
-            progressBar.Value = e.ProgressPercentage;
-            
-            // Calcular velocidad y tiempo restante
-            double elapsedSeconds = (DateTime.Now - startTime).TotalSeconds;
-            double speed = e.BytesReceived / elapsedSeconds;
-            double remainingBytes = e.TotalBytesToReceive - e.BytesReceived;
-            double remainingSeconds = remainingBytes / speed;
-            
-            // Actualizar labels
-            this.Invoke((MethodInvoker)delegate
-            {
-                lblStatus.Text = $"Descargando... {e.BytesReceived / (1024 * 1024):N0} MB / {e.TotalBytesToReceive / (1024 * 1024):N0} MB";
-                lblSpeed.Text = $"Velocidad: {speed / 1024 / 1024:N1} MB/s";
-                lblTimeRemaining.Text = $"Tiempo restante: {TimeSpan.FromSeconds(remainingSeconds):mm\\:ss}";
-            });
-        }
-        
-        private void WebClient_DownloadFileCompleted(object sender, System.ComponentModel.AsyncCompletedEventArgs e)
-        {
-            if (e.Error != null)
-            {
-                MessageBox.Show($"Error descargando: {e.Error.Message}", "Error", 
-                              MessageBoxButtons.OK, MessageBoxIcon.Error);
-                btnInstall.Enabled = true;
-                btnBrowse.Enabled = true;
+                MessageBox.Show("Espacio en disco insuficiente. Necesitas al menos 20GB libres.", 
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Application.Exit();
                 return;
             }
             
-            lblStatus.Text = "Descarga completada. Extrayendo archivos...";
-            
-            // Extraer en hilo separado
-            Task.Run(() => ExtractAndInstall());
+            await InstallAtlasAsync();
         }
-        
-        private void ExtractAndInstall()
+
+        private bool CheckDiskSpace()
         {
             try
             {
-                int totalFiles = 0;
-                int extractedFiles = 0;
-                
-                // Obtener número total de archivos en el ZIP
-                using (ZipArchive archive = ZipFile.OpenRead(tempZipPath))
+                if (IsWindows)
                 {
-                    totalFiles = archive.Entries.Count;
+                    // Versión Windows
+                    string systemDrive = Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.System));
+                    DriveInfo drive = new DriveInfo(systemDrive);
+                    long freeSpaceGB = drive.AvailableFreeSpace / (1024 * 1024 * 1024);
+                    return freeSpaceGB >= 20;
                 }
-                
-                // Extraer con progreso
-                using (ZipArchive archive = ZipFile.OpenRead(tempZipPath))
+                else
                 {
-                    foreach (ZipArchiveEntry entry in archive.Entries)
+                    // Versión Linux/Mono - simplificada
+                    // En Linux, verificar espacio en el home del usuario
+                    string homePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                    try
                     {
-                        string destinationPath = Path.Combine(installPath, entry.FullName);
-                        
-                        // Crear directorio si es necesario
-                        string directory = Path.GetDirectoryName(destinationPath);
-                        if (!Directory.Exists(directory))
-                            Directory.CreateDirectory(directory);
-                        
-                        // Extraer archivo
-                        entry.ExtractToFile(destinationPath, true);
-                        
-                        extractedFiles++;
-                        int progress = (extractedFiles * 100) / totalFiles;
-                        
-                        // Actualizar UI
-                        this.Invoke((MethodInvoker)delegate
-                        {
-                            progressBar.Value = progress;
-                            lblStatus.Text = $"Extrayendo... {extractedFiles}/{totalFiles} archivos";
-                        });
+                        DriveInfo drive = new DriveInfo(Path.GetPathRoot(homePath) ?? "/");
+                        long freeSpaceGB = drive.AvailableFreeSpace / (1024 * 1024 * 1024);
+                        return freeSpaceGB >= 20;
+                    }
+                    catch
+                    {
+                        return true; // Si no podemos verificar, asumimos que hay espacio
                     }
                 }
-                
-                // Crear archivo de versión
-                CreateVersionFile();
-                
-                // Crear accesos directos
-                if (chkCreateDesktopShortcut.Checked)
-                    CreateDesktopShortcut();
-                    
-                if (chkCreateStartMenu.Checked)
-                    CreateStartMenuShortcut();
-                
-                // Limpiar archivo temporal
-                File.Delete(tempZipPath);
-                
-                // Mostrar completado
-                this.Invoke((MethodInvoker)delegate
+            }
+            catch
+            {
+                return true; // Si no podemos verificar, asumimos que hay espacio
+            }
+        }
+
+        private async Task InstallAtlasAsync()
+        {
+            try
+            {
+                // 1. Seleccionar carpeta
+                using (var dialog = new FolderBrowserDialog())
                 {
-                    panelMain.Visible = false;
-                    panelComplete.Visible = true;
-                    btnCheckUpdates.Enabled = true;
-                });
+                    dialog.Description = "Selecciona carpeta para instalar Atlas Interactivo";
+                    dialog.ShowNewFolderButton = true;
+                    
+                    // Root folder que funcione en ambos sistemas
+                    dialog.RootFolder = Environment.SpecialFolder.MyComputer;
+                    
+                    if (dialog.ShowDialog() != DialogResult.OK)
+                    {
+                        MessageBox.Show("Instalación cancelada", "Atlas Interactivo", 
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        Application.Exit();
+                        return;
+                    }
+                    
+                    string installPath = dialog.SelectedPath;
+                    lblStatus.Text = $"Instalando en: {installPath}";
+                    
+                    // Verificar que la carpeta esté vacía (opcional, simplificado)
+                    try
+                    {
+                        if (Directory.Exists(installPath) && 
+                            Directory.GetFiles(installPath).Length > 0 &&
+                            Directory.GetDirectories(installPath).Length > 0)
+                        {
+                            DialogResult result = MessageBox.Show(
+                                "La carpeta seleccionada no está vacía. ¿Deseas continuar?",
+                                "Advertencia",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Warning);
+                            
+                            if (result != DialogResult.Yes)
+                            {
+                                Application.Exit();
+                                return;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Continuar incluso si no podemos verificar
+                    }
+                    
+                    // 2. Descargar archivos
+                    lblStatus.Text = "Descargando Atlas Interactivo...";
+                    bool downloadSuccess = await DownloadFilesAsync(installPath);
+                    
+                    if (!downloadSuccess)
+                    {
+                        MessageBox.Show("Error durante la descarga. Verifica tu conexión a internet.", 
+                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        Application.Exit();
+                        return;
+                    }
+                    
+                    // 3. Extraer
+                    lblStatus.Text = "Extrayendo archivos...";
+                    bool extractSuccess = ExtractFiles(installPath);
+                    
+                    if (!extractSuccess)
+                    {
+                        MessageBox.Show("Error extrayendo archivos.", 
+                            "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        Application.Exit();
+                        return;
+                    }
+                    
+                    // 4. Crear acceso directo (solo si es posible)
+                    try
+                    {
+                        lblStatus.Text = "Finalizando instalación...";
+                        CreateShortcut(installPath);
+                    }
+                    catch
+                    {
+                        // No es crítico si falla el acceso directo
+                    }
+                    
+                    // 5. Mostrar mensaje de éxito
+                    lblStatus.Text = "¡Instalación completada!";
+                    progressBar.Value = 100;
+                    
+                    DialogResult launchResult = MessageBox.Show(
+                        "¡Atlas Interactivo se ha instalado exitosamente!\n\n" +
+                        $"Carpeta de instalación: {installPath}\n\n" +
+                        "¿Deseas abrir la carpeta de instalación?",
+                        "Instalación Completada", 
+                        MessageBoxButtons.YesNo, 
+                        MessageBoxIcon.Information);
+                    
+                    if (launchResult == DialogResult.Yes)
+                    {
+                        OpenInstallFolder(installPath);
+                    }
+                    
+                    Application.Exit();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Application.Exit();
+            }
+        }
+
+        private async Task<bool> DownloadFilesAsync(string installPath)
+        {
+            try
+            {
+                // URL del archivo en Google Drive
+                string fileId = "TU_FILE_ID_DE_DRIVE"; // Cambiar por tu ID real
+                string downloadUrl = $"https://drive.google.com/uc?export=download&id={fileId}";
+                
+                using (var client = new WebClient())
+                {
+                    client.DownloadProgressChanged += (s, e) =>
+                    {
+                        // Asegurarse de que estamos en el hilo de la UI
+                        if (this.InvokeRequired)
+                        {
+                            this.Invoke(new Action(() =>
+                            {
+                                progressBar.Value = e.ProgressPercentage;
+                                lblProgress.Text = $"{e.ProgressPercentage}% - {e.BytesReceived / 1024 / 1024}MB";
+                                lblStatus.Text = $"Descargando... {e.ProgressPercentage}%";
+                                
+                                // Actualizar título de ventana con progreso
+                                this.Text = $"Instalador Atlas Interactivo - {e.ProgressPercentage}%";
+                            }));
+                        }
+                        else
+                        {
+                            progressBar.Value = e.ProgressPercentage;
+                            lblProgress.Text = $"{e.ProgressPercentage}% - {e.BytesReceived / 1024 / 1024}MB";
+                            lblStatus.Text = $"Descargando... {e.ProgressPercentage}%";
+                            this.Text = $"Instalador Atlas Interactivo - {e.ProgressPercentage}%";
+                        }
+                    };
+                    
+                    string tempFile = Path.Combine(Path.GetTempPath(), "atlas_temp.zip");
+                    await client.DownloadFileTaskAsync(new Uri(downloadUrl), tempFile);
+                    
+                    // Mover a carpeta de instalación
+                    string destFile = Path.Combine(installPath, "atlas_files.zip");
+                    if (File.Exists(tempFile))
+                    {
+                        File.Move(tempFile, destFile);
+                        return true;
+                    }
+                    
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error descargando: {ex.Message}", "Error", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
+        private bool ExtractFiles(string installPath)
+        {
+            try
+            {
+                string zipFile = Path.Combine(installPath, "atlas_files.zip");
+                string extractPath = installPath;
+                
+                if (!File.Exists(zipFile))
+                {
+                    MessageBox.Show("No se encontró el archivo descargado.", "Error", 
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return false;
+                }
+                
+                // Método universal: usar System.IO.Compression que funciona en ambos
+                try
+                {
+                    // Crear directorio si no existe
+                    if (!Directory.Exists(extractPath))
+                        Directory.CreateDirectory(extractPath);
+                    
+                    // Extraer con System.IO.Compression
+                    ZipFile.ExtractToDirectory(zipFile, extractPath);
+                    
+                    // Eliminar zip después de extraer
+                    File.Delete(zipFile);
+                    return true;
+                }
+                catch (Exception zipEx)
+                {
+                    // Fallback: intentar con herramienta externa
+                    return ExtractWithExternalTool(zipFile, extractPath);
+                }
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Error extrayendo: {ex.Message}", "Error", 
-                              MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
             }
         }
-        
-        private void CreateVersionFile()
-        {
-            var versionInfo = new
-            {
-                version = "1.0.0",
-                installed_date = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                install_path = installPath,
-                total_files = CountFiles(installPath)
-            };
-            
-            string json = JsonConvert.SerializeObject(versionInfo, Formatting.Indented);
-            File.WriteAllText(Path.Combine(installPath, VERSION_FILE), json);
-        }
-        
-        private int CountFiles(string directory)
-        {
-            return Directory.GetFiles(directory, "*", SearchOption.AllDirectories).Length;
-        }
-        
-        private void CreateDesktopShortcut()
-        {
-            string shortcutPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-                "Atlas Interactivo.lnk");
-                
-            CreateShortcut(shortcutPath);
-        }
-        
-        private void CreateStartMenuShortcut()
-        {
-            string startMenuPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
-                "Programs", "Atlas Interactivo.lnk");
-                
-            CreateShortcut(startMenuPath);
-        }
-        
-        private void CreateShortcut(string shortcutPath)
+
+        private bool ExtractWithExternalTool(string zipFile, string extractPath)
         {
             try
             {
-                string targetPath = Path.Combine(installPath, "Atlas_Interactivo.exe");
-                
-                if (!File.Exists(targetPath))
-                    return;
+                if (IsWindows)
+                {
+                    // En Windows, intentar con PowerShell
+                    string command = $@"Expand-Archive -Path '{zipFile}' -DestinationPath '{extractPath}' -Force";
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = "powershell",
+                        Arguments = $"-Command \"{command}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
                     
-                // Usar Windows Script Host para crear acceso directo
-                string script = $@"
-                    Set oWS = WScript.CreateObject(""WScript.Shell"")
-                    Set oLink = oWS.CreateShortcut(""{shortcutPath.Replace(@"\", @"\\")}"")
-                    oLink.TargetPath = ""{targetPath.Replace(@"\", @"\\")}""
-                    oLink.WorkingDirectory = ""{installPath.Replace(@"\", @"\\")}""
-                    oLink.Save
-                ";
-                
-                string tempScript = Path.GetTempFileName() + ".vbs";
-                File.WriteAllText(tempScript, script);
-                
-                Process.Start("wscript.exe", tempScript).WaitForExit();
-                File.Delete(tempScript);
-            }
-            catch { /* Silenciar errores de acceso directo */ }
-        }
-        
-        private void LaunchAtlas()
-        {
-            string exePath = Path.Combine(installPath, "Atlas_Interactivo.exe");
-            if (File.Exists(exePath))
-            {
-                Process.Start(exePath);
-                Application.Exit();
-            }
-        }
-        
-        private async void BtnCheckUpdates_Click(object sender, EventArgs e)
-        {
-            var updateForm = new UpdateForm(installPath, PATCHES_FOLDER_ID);
-            updateForm.ShowDialog();
-        }
-    }
-    
-    // Formulario de actualizaciones
-    public class UpdateForm : Form
-    {
-        private string installPath;
-        private string patchesFolderId;
-        private ListView listViewPatches;
-        private Button btnApply;
-        private Button btnCancel;
-        private List<PatchInfo> availablePatches;
-        
-        public UpdateForm(string path, string folderId)
-        {
-            installPath = path;
-            patchesFolderId = folderId;
-            InitializeComponent();
-            LoadAvailablePatches();
-        }
-        
-        private void InitializeComponent()
-        {
-            this.Text = "Actualizaciones de Atlas";
-            this.Size = new Size(500, 400);
-            this.StartPosition = FormStartPosition.CenterParent;
-            
-            // ListView para parches
-            listViewPatches = new ListView();
-            listViewPatches.Size = new Size(460, 250);
-            listViewPatches.Location = new Point(20, 20);
-            listViewPatches.View = View.Details;
-            listViewPatches.CheckBoxes = true;
-            listViewPatches.FullRowSelect = true;
-            
-            // Columnas
-            listViewPatches.Columns.Add("", 30);
-            listViewPatches.Columns.Add("Nombre", 200);
-            listViewPatches.Columns.Add("Tamaño", 100);
-            listViewPatches.Columns.Add("Fecha", 100);
-            
-            // Botones
-            btnApply = new Button();
-            btnApply.Text = "Aplicar Seleccionados";
-            btnApply.Size = new Size(150, 35);
-            btnApply.Location = new Point(100, 290);
-            btnApply.Click += BtnApply_Click;
-            
-            btnCancel = new Button();
-            btnCancel.Text = "Cancelar";
-            btnCancel.Size = new Size(150, 35);
-            btnCancel.Location = new Point(260, 290);
-            btnCancel.Click += (s, e) => this.Close();
-            
-            this.Controls.AddRange(new Control[] { listViewPatches, btnApply, btnCancel });
-        }
-        
-        private async void LoadAvailablePatches()
-        {
-            availablePatches = await PatchManager.GetAvailablePatches(installPath, patchesFolderId);
-            
-            foreach (var patch in availablePatches)
-            {
-                var item = new ListViewItem(new[] {
-                    "",
-                    patch.Name,
-                    patch.Size,
-                    patch.Date
-                });
-                item.Tag = patch;
-                listViewPatches.Items.Add(item);
-            }
-        }
-        
-        private async void BtnApply_Click(object sender, EventArgs e)
-        {
-            var selectedPatches = new List<PatchInfo>();
-            
-            foreach (ListViewItem item in listViewPatches.Items)
-            {
-                if (item.Checked)
-                {
-                    selectedPatches.Add((PatchInfo)item.Tag);
+                    using (Process process = Process.Start(psi))
+                    {
+                        process.WaitForExit(30000); // 30 segundos timeout
+                        if (process.ExitCode == 0 && File.Exists(zipFile))
+                        {
+                            File.Delete(zipFile);
+                            return true;
+                        }
+                    }
                 }
+                else
+                {
+                    // En Linux, intentar con unzip
+                    string unzipCommand = IsWindows ? "powershell Expand-Archive" : "unzip";
+                    
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = IsWindows ? "powershell" : "unzip",
+                        Arguments = IsWindows ? 
+                            $"-Command \"Expand-Archive -Path '{zipFile}' -DestinationPath '{extractPath}' -Force\"" :
+                            $"-o '{zipFile}' -d '{extractPath}'",
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    
+                    using (Process process = Process.Start(psi))
+                    {
+                        process.WaitForExit(30000);
+                        if (process.ExitCode == 0 && File.Exists(zipFile))
+                        {
+                            File.Delete(zipFile);
+                            return true;
+                        }
+                    }
+                }
+                
+                // Si llegamos aquí, falló
+                MessageBox.Show("No se pudo extraer el archivo. Por favor, extrae manualmente el archivo .zip", 
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
             }
-            
-            if (selectedPatches.Count == 0)
+            catch
             {
-                MessageBox.Show("Selecciona al menos un parche para aplicar.", 
-                              "Información", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
+                return false;
             }
-            
-            // Aplicar parches
-            var progressForm = new ProgressForm("Aplicando actualizaciones...");
-            progressForm.Show();
-            
+        }
+
+        private void CreateShortcut(string installPath)
+        {
             try
             {
-                foreach (var patch in selectedPatches)
-                {
-                    await PatchManager.ApplyPatch(installPath, patch);
-                }
+                string exePath = Path.Combine(installPath, "Atlas_Interactivo.exe");
                 
-                progressForm.Close();
-                MessageBox.Show("Actualizaciones aplicadas correctamente.", 
-                              "Éxito", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                this.Close();
+                if (File.Exists(exePath))
+                {
+                    if (IsWindows)
+                    {
+                        // En Windows, crear archivo .url
+                        string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                        string urlShortcut = Path.Combine(desktopPath, "Atlas Interactivo.url");
+                        string urlContent = $"[InternetShortcut]\nURL=file:///{exePath.Replace("\\", "/")}\nIconIndex=0\nIconFile={exePath}";
+                        
+                        File.WriteAllText(urlShortcut, urlContent);
+                    }
+                    else
+                    {
+                        // En Linux, crear un script .desktop simple
+                        string desktopPath = Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                            "Desktop",
+                            "Atlas_Interactivo.desktop");
+                        
+                        string desktopContent = $@"[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Atlas Interactivo
+Comment=Atlas Interactivo
+Exec={exePath}
+Icon=
+Terminal=false
+Categories=Education;Geography;
+";
+                        
+                        File.WriteAllText(desktopPath, desktopContent);
+                        
+                        // Hacer ejecutable
+                        Process.Start("chmod", $"+x \"{desktopPath}\"");
+                    }
+                }
             }
             catch (Exception ex)
             {
-                progressForm.Close();
-                MessageBox.Show($"Error aplicando parches: {ex.Message}", 
-                              "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                // No es crítico si falla el acceso directo
+                Debug.WriteLine($"Error creando acceso directo: {ex.Message}");
             }
         }
-    }
-    
-    // Gestor de parches
-    public static class PatchManager
-    {
-        public static async Task<List<PatchInfo>> GetAvailablePatches(string installPath, string folderId)
+
+        private void OpenInstallFolder(string installPath)
         {
-            var patches = new List<PatchInfo>();
+            try
+            {
+                if (IsWindows)
+                {
+                    Process.Start("explorer.exe", installPath);
+                }
+                else
+                {
+                    // En Linux, intentar con xdg-open
+                    Process.Start("xdg-open", installPath);
+                }
+            }
+            catch
+            {
+                // Si falla, mostrar mensaje
+                MessageBox.Show($"La carpeta de instalación es:\n{installPath}", 
+                    "Carpeta de Instalación", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private void MainForm_Resize(object sender, EventArgs e)
+        {
+            // Solo en Windows hacer resize dinámico
+            if (!IsWindows) return;
             
-            // Leer versión actual
-            string versionFile = Path.Combine(installPath, ".atlas_version.json");
-            if (!File.Exists(versionFile))
-                return patches;
+            try
+            {
+                int margin = 20;
+                int controlWidth = this.ClientSize.Width - (margin * 2);
                 
-            string currentVersion = JsonConvert.DeserializeObject<dynamic>(
-                File.ReadAllText(versionFile)).version.ToString();
-            
-            // En una implementación real, aquí consultarías Drive API
-            // Por ahora simulamos algunos parches
-            patches.Add(new PatchInfo
-            {
-                Id = "patch_001",
-                Name = "Actualización de mapas 2024",
-                Size = "150 MB",
-                Date = "2024-01-15",
-                FileId = "PATCH_FILE_ID_1",
-                Version = "1.0.1"
-            });
-            
-            patches.Add(new PatchInfo
-            {
-                Id = "patch_002", 
-                Name = "Nuevos datos climáticos",
-                Size = "80 MB",
-                Date = "2024-01-20",
-                FileId = "PATCH_FILE_ID_2",
-                Version = "1.0.2"
-            });
-            
-            return patches;
-        }
-        
-        public static async Task ApplyPatch(string installPath, PatchInfo patch)
-        {
-            // Descargar parche
-            string tempFile = Path.GetTempFileName() + ".zip";
-            string url = $"https://drive.google.com/uc?id={patch.FileId}&export=download";
-            
-            using (WebClient client = new WebClient())
-            {
-                await client.DownloadFileTaskAsync(new Uri(url), tempFile);
+                // Título
+                lblTitle.Location = new Point(margin, margin);
+                lblTitle.Size = new Size(controlWidth, 30);
+                
+                // Estado
+                lblStatus.Location = new Point(margin, lblTitle.Bottom + 10);
+                lblStatus.Size = new Size(controlWidth, 30);
+                
+                // Barra de progreso
+                progressBar.Location = new Point(margin, lblStatus.Bottom + 10);
+                progressBar.Size = new Size(controlWidth, 25);
+                
+                // Detalles de progreso
+                lblProgress.Location = new Point(margin, progressBar.Bottom + 10);
+                lblProgress.Size = new Size(controlWidth, 20);
+                
+                // Botón cancelar
+                btnCancel.Location = new Point(
+                    this.ClientSize.Width - btnCancel.Width - margin,
+                    this.ClientSize.Height - btnCancel.Height - margin);
             }
-            
-            // Aplicar parche
-            ZipFile.ExtractToDirectory(tempFile, installPath, true);
-            
-            // Actualizar versión
-            UpdateVersion(installPath, patch.Version);
-            
-            // Limpiar
-            File.Delete(tempFile);
+            catch
+            {
+                // Ignorar errores de resize
+            }
         }
-        
-        private static void UpdateVersion(string installPath, string newVersion)
+
+        private void btnCancel_Click(object sender, EventArgs e)
         {
-            string versionFile = Path.Combine(installPath, ".atlas_version.json");
-            var data = JsonConvert.DeserializeObject<dynamic>(File.ReadAllText(versionFile));
-            data.version = newVersion;
-            data.last_update = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            DialogResult result = MessageBox.Show(
+                "¿Estás seguro de que deseas cancelar la instalación?",
+                "Confirmar Cancelación",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
             
-            File.WriteAllText(versionFile, JsonConvert.SerializeObject(data, Formatting.Indented));
+            if (result == DialogResult.Yes)
+            {
+                Application.Exit();
+            }
         }
-    }
-    
-    public class PatchInfo
-    {
-        public string Id { get; set; }
-        public string Name { get; set; }
-        public string Size { get; set; }
-        public string Date { get; set; }
-        public string FileId { get; set; }
-        public string Version { get; set; }
-    }
-    
-    // Formulario de progreso
-    public class ProgressForm : Form
-    {
-        private Label lblMessage;
+
+        #region Windows Form Designer generated code
+        private System.ComponentModel.IContainer components = null;
+        private Label lblTitle;
+        private Label lblStatus;
         private ProgressBar progressBar;
-        
-        public ProgressForm(string message)
+        private Label lblProgress;
+        private Button btnCancel;
+
+        protected override void Dispose(bool disposing)
         {
-            this.Text = "Progreso";
-            this.Size = new Size(300, 150);
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.ControlBox = false;
-            
-            lblMessage = new Label();
-            lblMessage.Text = message;
-            lblMessage.AutoSize = true;
-            lblMessage.Location = new Point(20, 20);
-            
-            progressBar = new ProgressBar();
-            progressBar.Style = ProgressBarStyle.Marquee;
-            progressBar.Size = new Size(260, 30);
-            progressBar.Location = new Point(20, 60);
-            
-            this.Controls.AddRange(new Control[] { lblMessage, progressBar });
+            if (disposing && (components != null))
+                components.Dispose();
+            base.Dispose(disposing);
         }
+
+        private void InitializeComponent()
+        {
+            this.lblTitle = new Label();
+            this.lblStatus = new Label();
+            this.progressBar = new ProgressBar();
+            this.lblProgress = new Label();
+            this.btnCancel = new Button();
+            this.SuspendLayout();
+            
+            // lblTitle
+            this.lblTitle.AutoSize = false;
+            this.lblTitle.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point);
+            this.lblTitle.ForeColor = Color.FromArgb(44, 62, 80);
+            this.lblTitle.Location = new Point(20, 20);
+            this.lblTitle.Size = new Size(560, 40); // Más grande
+            this.lblTitle.Text = "🌍 Atlas Interactivo - Instalador";
+            this.lblTitle.TextAlign = ContentAlignment.MiddleCenter;
+            
+            // lblStatus
+            this.lblStatus.AutoSize = false;
+            this.lblStatus.Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+            this.lblStatus.ForeColor = Color.FromArgb(127, 140, 141);
+            this.lblStatus.Location = new Point(20, 80);
+            this.lblStatus.Size = new Size(560, 30);
+            this.lblStatus.Text = "Preparando instalación...";
+            this.lblStatus.TextAlign = ContentAlignment.MiddleLeft;
+            
+            // progressBar
+            this.progressBar.Location = new Point(20, 120);
+            this.progressBar.Size = new Size(560, 30); // Más grande
+            this.progressBar.Style = ProgressBarStyle.Continuous;
+            this.progressBar.Minimum = 0;
+            this.progressBar.Maximum = 100;
+            
+            // lblProgress
+            this.lblProgress.AutoSize = false;
+            this.lblProgress.Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            this.lblProgress.ForeColor = Color.FromArgb(52, 152, 219);
+            this.lblProgress.Location = new Point(20, 160);
+            this.lblProgress.Size = new Size(560, 25);
+            this.lblProgress.Text = "0% - 0MB";
+            this.lblProgress.TextAlign = ContentAlignment.MiddleCenter;
+            
+            // btnCancel
+            this.btnCancel.Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+            this.btnCancel.Location = new Point(470, 200); // Posición fija
+            this.btnCancel.Size = new Size(110, 35);
+            this.btnCancel.Text = "Cancelar";
+            this.btnCancel.UseVisualStyleBackColor = true;
+            this.btnCancel.Click += new EventHandler(btnCancel_Click);
+            
+            // MainForm - TAMAÑO INICIAL MÁS GRANDE
+            this.ClientSize = new Size(600, 250);
+            this.Controls.Add(this.lblTitle);
+            this.Controls.Add(this.lblStatus);
+            this.Controls.Add(this.progressBar);
+            this.Controls.Add(this.lblProgress);
+            this.Controls.Add(this.btnCancel);
+            
+            // Usar FixedDialog en ambos para evitar problemas
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = true;
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.Text = "Instalador Atlas Interactivo";
+            this.Load += new EventHandler(MainForm_Load);
+            this.ResumeLayout(false);
+        }
+        #endregion
     }
-    
-    // Punto de entrada
+
     static class Program
     {
         [STAThread]
@@ -714,7 +625,25 @@ namespace AtlasInstaller
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            
+            // Configurar alta compatibilidad DPI solo en Windows
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+            {
+                try
+                {
+                    SetProcessDPIAware();
+                }
+                catch
+                {
+                    // Ignorar si falla
+                }
+            }
+            
             Application.Run(new MainForm());
         }
+        
+        // Solo incluir en Windows
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetProcessDPIAware();
     }
 }

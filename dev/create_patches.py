@@ -1,9 +1,8 @@
-# Atlas_Distribution/dev/create_patches.py (COMPLETO)
+# Atlas_Distribution/dev/create_patches.py (MODIFICADO - SOLO WINDOWS C# Y LINUX QT)
 #!/usr/bin/env python3
 """
-SISTEMA DE CREACIÓN DE PARCHES PARA ATLAS
-Uso: python create_patches.py [platform]
-Platform: windows o linux
+SISTEMA DE CREACIÓN DE PARCHES Y CONSTRUCCIÓN DE INSTALADORES
+Uso: python create_patches.py [platform|build]
 """
 
 import os
@@ -16,6 +15,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 import sys
+
+
 
 class PatchSystem:
     def __init__(self, platform="linux"):
@@ -157,180 +158,299 @@ class PatchSystem:
         return file_name
 
 
-def run(self):
-    """Ejecuta el proceso completo de creación de parches"""
-    print(f"\n{'='*60}")
-    print(f"🔄 SISTEMA DE PARCHES - {self.platform.upper()}")
-    print(f"{'='*60}")
-    
-    # 1. Cargar manifest anterior
-    old_manifest = self.load_manifest()
-    
-    # 2. Crear nuevo manifest
-    new_manifest = self.create_manifest()
-    
-    # 3. Encontrar cambios
-    changes = self.find_changes(old_manifest, new_manifest)
-    
-    total_changes = len(changes["new"]) + len(changes["modified"])
-    if total_changes == 0:
-        print("✅ No hay cambios detectados")
-        return None  # ← Cambiar 'return' a 'return None'
-    
-    print(f"📊 Cambios detectados: {total_changes} archivos")
-    
-    # 4. Crear parche
-    patch_file = self.create_patch(changes)
-    
-    if patch_file:
-        # 5. Subir a Drive
-        self.upload_to_drive(patch_file)
+    def run(self):
+        """Ejecuta el proceso completo de creación de parches"""
+        print(f"\n{'='*60}")
+        print(f"🔄 SISTEMA DE PARCHES - {self.platform.upper()}")
+        print(f"{'='*60}")
         
-        # 6. Actualizar manifest
-        with open(self.manifest_file, 'w') as f:
-            json.dump(new_manifest, f, indent=2)
+        # 1. Cargar manifest anterior
+        old_manifest = self.load_manifest()
         
-        print(f"\n✅ Manifest actualizado: {self.manifest_file}")
-    
-    print(f"{'='*60}")
-    
-    return patch_file  # ← Esto está bien, patch_file será None si no se creó
+        # 2. Crear nuevo manifest
+        new_manifest = self.create_manifest()
+        
+        # 3. Encontrar cambios
+        changes = self.find_changes(old_manifest, new_manifest)
+        
+        total_changes = len(changes["new"]) + len(changes["modified"])
+        if total_changes == 0:
+            print("✅ No hay cambios detectados")
+            return None  # ← Cambiar 'return' a 'return None'
+        
+        print(f"📊 Cambios detectados: {total_changes} archivos")
+        
+        # 4. Crear parche
+        patch_file = self.create_patch(changes)
+        
+        if patch_file:
+            # 5. Subir a Drive
+            self.upload_to_drive(patch_file)
+            
+            # 6. Actualizar manifest
+            with open(self.manifest_file, 'w') as f:
+                json.dump(new_manifest, f, indent=2)
+            
+            print(f"\n✅ Manifest actualizado: {self.manifest_file}")
+        
+        print(f"{'='*60}")
+        
+        return patch_file  # ← Esto está bien, patch_file será None si no se creó
 
-# ========== PARTE NUEVA: SCRIPT DE CONSTRUCCIÓN COMPLETO ==========
-def build_installers():
-    """Script para construir los instaladores"""
-    print("🔨 CONSTRUYENDO INSTALADORES")
+# ========== NUEVA FUNCIÓN: CONSTRUIR INSTALADOR LINUX QT ==========
+
+def build_linux_qt():
+    """Construye el instalador Linux Qt usando el script bash"""
+    print("\n🐧 Construyendo instalador Linux Qt...")
+    
+    # Verificar que exista el script de construcción Qt
+    qt_script = "build_qt_final.sh"
+    if not os.path.exists(qt_script):
+        print(f"  ❌ No se encuentra: {qt_script}")
+        print(f"  💡 Crea primero el script de construcción Qt")
+        return False
+    
+    try:
+        # Dar permisos de ejecución
+        os.chmod(qt_script, 0o755)
+        
+        # Ejecutar el script de construcción Qt
+        print(f"  🛠️  Ejecutando {qt_script}...")
+        result = subprocess.run(
+            [f"./{qt_script}"],
+            capture_output=True,
+            text=True,
+            shell=True
+        )
+        
+        if result.returncode == 0:
+            print("  ✅ Instalador Qt construido exitosamente")
+            
+            # Verificar si se creó el archivo
+            if os.path.exists("../AtlasInstallerQt"):
+                size_bytes = os.path.getsize("../AtlasInstallerQt")
+                size_mb = size_bytes / (1024 * 1024)
+                print(f"  📦 Archivo: ../AtlasInstallerQt ({size_mb:.2f} MB)")
+                return True
+            else:
+                print("  ⚠️  No se encontró ../AtlasInstallerQt")
+                return False
+        else:
+            print(f"  ❌ Error construyendo instalador Qt:")
+            if result.stdout:
+                print(f"  Salida: {result.stdout[:200]}")
+            if result.stderr:
+                print(f"  Error: {result.stderr[:200]}")
+            return False
+                
+    except Exception as e:
+        print(f"  ❌ Error inesperado: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+# ========== FUNCIÓN PRINCIPAL DE CONSTRUCCIÓN (WINDOWS C# + LINUX QT) ==========
+
+def build_installers(compiler='mono'):
+    """Construye ambos instaladores: Windows C# y Linux Qt"""
+    print("🔨 CONSTRUYENDO INSTALADORES (Windows C# + Linux Qt)")
     print("=" * 50)
     
     # 1. Windows (C#)
-    print("\n🪟 Compilando instalador Windows...")
+    print("\n🪟 Construyendo instalador Windows C#...")
     
     cs_source = "AtlasInstaller.cs"
     if os.path.exists(cs_source):
         try:
-            # Verificar si existe el compilador de C#
-            if shutil.which("csc"):
-                print("  Compilando AtlasInstaller.cs con csc...")
+            # Usar Mono si está disponible
+            if shutil.which("mcs") and compiler == 'mono':
+                print("  Compilando con Mono (mcs)...")
                 subprocess.run([
-                    "csc", "/out:../AtlasInstaller.exe", 
-                    "/target:winexe",
-                    "/reference:System.Windows.Forms.dll",
-                    "/reference:System.Drawing.dll",
-                    "/reference:System.Net.Http.dll",
-                    "/platform:anycpu",
-                    "/optimize",
+                    "mcs", "-target:winexe",
+                    "-out:../AtlasInstaller.exe",
+                    "-r:System.Windows.Forms",
+                    "-r:System.Drawing",
+                    "-r:System.Net.Http",
+                    "-r:System.IO.Compression",
+                    "-r:System.IO.Compression.FileSystem",
+                    "-optimize",
                     cs_source
                 ], check=True)
-                print("  ✅ AtlasInstaller.exe creado en directorio principal")
+                print("  ✅ AtlasInstaller.exe creado")
+                
+            elif shutil.which("dotnet") and compiler == 'dotnet':
+                print("  Compilando con .NET SDK en Linux...")
+                
+                # Crear directorio temporal para .NET
+                temp_dir = "temp_dotnet_build"
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+                os.makedirs(temp_dir)
+                
+                # Crear archivo .csproj para Linux
+                csproj_content = '''<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <EnableWindowsFormsLoading>true</EnableWindowsFormsLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.IO.Compression.ZipFile" Version="4.3.0" />
+    <PackageReference Include="Microsoft.Windows.Compatibility" Version="8.0.0" />
+  </ItemGroup>
+</Project>'''
+                
+                with open(os.path.join(temp_dir, "AtlasInstaller.csproj"), "w") as f:
+                    f.write(csproj_content)
+                
+                # Copiar y adaptar archivo fuente
+                with open(cs_source, 'r') as src_file:
+                    cs_content = src_file.read()
+                
+                if 'static class Program' in cs_content and '[STAThread]' in cs_content:
+                    program_content = cs_content
+                else:
+                    program_content = f'''using System;
+using System.IO;
+using System.Net;
+using System.Windows.Forms;
+using System.Threading.Tasks;
+using System.Diagnostics;
+using System.Drawing;
+using System.Runtime.InteropServices;
+using System.IO.Compression;
+
+namespace AtlasInstaller
+{{
+    static class Program
+    {{
+        [STAThread]
+        static void Main()
+        {{
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            
+            if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+            {{
+                try
+                {{
+                    SetProcessDPIAware();
+                }}
+                catch {{ }}
+            }}
+            
+            Application.Run(new MainForm());
+        }}
+        
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetProcessDPIAware();
+    }}
+    
+    {cs_content[cs_content.find('public partial class MainForm'):]}
+}}'''
+                
+                with open(os.path.join(temp_dir, "Program.cs"), "w") as f:
+                    f.write(program_content)
+                
+                # Restaurar y compilar
+                print("  📦 Restaurando paquetes...")
+                restore_result = subprocess.run(
+                    ["dotnet", "restore"],
+                    cwd=temp_dir,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if restore_result.returncode != 0:
+                    print(f"  ⚠️  Advertencia en restore: {restore_result.stderr[:200]}")
+                
+                # Compilar
+                print("  🔧 Ejecutando dotnet publish...")
+                publish_result = subprocess.run(
+                    ["dotnet", "publish", 
+                     "-c", "Release", 
+                     "--self-contained", "false",
+                     "-o", "publish",
+                     "-r", "win-x64",
+                     "--verbosity", "quiet"],
+                    cwd=temp_dir,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if publish_result.returncode == 0:
+                    publish_dir = os.path.join(temp_dir, "publish")
+                    if os.path.exists(publish_dir):
+                        exe_files = [f for f in os.listdir(publish_dir) if f.endswith('.exe')]
+                        if exe_files:
+                            exe_path = os.path.join(publish_dir, exe_files[0])
+                            shutil.copy(exe_path, "../AtlasInstaller_dotnet.exe")
+                            
+                            size_mb = os.path.getsize("../AtlasInstaller_dotnet.exe") / (1024 * 1024)
+                            print(f"  ✅ AtlasInstaller_dotnet.exe creado ({size_mb:.1f} MB)")
+                            
+                            if os.path.exists("../AtlasInstaller.exe"):
+                                os.remove("../AtlasInstaller.exe")
+                            shutil.copy("../AtlasInstaller_dotnet.exe", "../AtlasInstaller.exe")
+                            print(f"  🔗 También copiado como AtlasInstaller.exe")
+                
+                # Limpiar
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                
             else:
-                print("  ⚠️  csc (C# Compiler) no encontrado.")
-                print("  Alternativas:")
-                print("  1. Usa Visual Studio: Abre AtlasInstaller.cs y compila")
-                print("  2. Instala .NET SDK: dotnet build")
-                print("  3. Usa Mono: mcs -target:winexe -out:AtlasInstaller.exe AtlasInstaller.cs")
+                print("  ⚠️  No se encontró compilador de C# solicitado")
+                print(f"  Buscando: {compiler}")
                 
         except subprocess.CalledProcessError as e:
-            print(f"  ❌ Error compilando C#: {e}")
+            print(f"  ❌ Error de compilación: {e}")
+        except Exception as e:
+            print(f"  ❌ Error inesperado: {e}")
     else:
         print(f"  ❌ No se encuentra: {cs_source}")
     
-    # 2. Linux (Python + PyInstaller)
-    print("\n🐧 Creando AppImage para Linux...")
+    # 2. Linux (Qt) - REEMPLAZA PYINSTALLER POR QT
+    build_linux_qt()
     
-    py_source = "AtlasInstaller.py"
-    if os.path.exists(py_source):
-        try:
-            if shutil.which("pyinstaller"):
-                print("  Creando ejecutable con PyInstaller...")
-                
-                # Primero creamos el ejecutable
-                subprocess.run([
-                    "pyinstaller", "--onefile", 
-                    "--name", "AtlasInstaller",
-                    "--add-data", "icon.png:.",
-                    "--hidden-import", "requests",
-                    "--hidden-import", "tkinter",
-                    "--clean",
-                    py_source
-                ], check=True)
-                
-                print("  ✅ AtlasInstaller (binario) creado en dist/")
-                
-                # Crear AppImage (si está appimagetool)
-                if shutil.which("appimagetool"):
-                    print("  Creando AppImage...")
-                    
-                    # Crear estructura AppDir
-                    appdir = "AtlasInstaller.AppDir"
-                    shutil.rmtree(appdir, ignore_errors=True)
-                    os.makedirs(f"{appdir}/usr/bin", exist_ok=True)
-                    
-                    # Copiar ejecutable
-                    shutil.copy("dist/AtlasInstaller", f"{appdir}/usr/bin/")
-                    
-                    # Crear .desktop file
-                    desktop_content = """[Desktop Entry]
-Name=Atlas Installer
-Comment=Instalador de Atlas Interactivo
-Exec=AtlasInstaller
-Icon=atlas
-Terminal=false
-Type=Application
-Categories=Game;
-"""
-                    with open(f"{appdir}/atlas.desktop", "w") as f:
-                        f.write(desktop_content)
-                    
-                    # Crear icono
-                    icon_content = """<?xml version="1.0" encoding="UTF-8"?>
-<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg">
-<rect width="64" height="64" fill="#2563eb"/>
-<text x="32" y="32" font-family="Arial" font-size="24" 
-fill="white" text-anchor="middle" dy=".3em">A</text>
-</svg>"""
-                    with open(f"{appdir}/atlas.svg", "w") as f:
-                        f.write(icon_content)
-                    
-                    # Crear AppRun
-                    apprun_content = """#!/bin/bash
-cd "$(dirname "$0")"
-exec ./usr/bin/AtlasInstaller "$@"
-"""
-                    with open(f"{appdir}/AppRun", "w") as f:
-                        f.write(apprun_content)
-                    os.chmod(f"{appdir}/AppRun", 0o755)
-                    
-                    # Crear AppImage
-                    subprocess.run([
-                        "appimagetool", appdir, "../AtlasInstaller.AppImage"
-                    ], check=True)
-                    
-                    print("  ✅ AtlasInstaller.AppImage creado")
-                    shutil.rmtree(appdir, ignore_errors=True)
-                else:
-                    print("  ⚠️  appimagetool no encontrado.")
-                    print("  Instala: wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage")
-                    print("  chmod +x appimagetool-x86_64.AppImage")
-                    print("  sudo mv appimagetool-x86_64.AppImage /usr/local/bin/appimagetool")
-                    
-            else:
-                print("  ⚠️  PyInstaller no encontrado.")
-                print("  Instala: pip install pyinstaller")
-                
-        except subprocess.CalledProcessError as e:
-            print(f"  ❌ Error con PyInstaller: {e}")
-    else:
-        print(f"  ❌ No se encuentra: {py_source}")
-    
+    # 3. Mostrar resumen
     print("\n" + "=" * 50)
     print("📁 ARCHIVOS GENERADOS:")
-    print("  Windows: AtlasInstaller.exe (si se pudo compilar)")
-    print("  Linux: AtlasInstaller.AppImage (si appimagetool disponible)")
-    print("  Linux (alternativo): dist/AtlasInstaller (ejecutable binario)")
-    print("\n💡 Sube estos archivos a Google Drive junto con los .zip/.tar.gz")
+    
+    # Windows C#
+    if os.path.exists("../AtlasInstaller.exe"):
+        try:
+            size_bytes = os.path.getsize("../AtlasInstaller.exe")
+            size_mb = size_bytes / (1024 * 1024)
+            print(f"  ✅ Windows: AtlasInstaller.exe ({size_mb:.2f} MB) - C# GUI")
+        except:
+            print(f"  ✅ Windows: AtlasInstaller.exe - C# GUI")
+    else:
+        print("  ❌ Windows: No se pudo compilar AtlasInstaller.exe")
+    
+    # Linux Qt
+    if os.path.exists("../AtlasInstallerQt"):
+        try:
+            size_bytes = os.path.getsize("../AtlasInstallerQt")
+            size_mb = size_bytes / (1024 * 1024)
+            print(f"  ✅ Linux: AtlasInstallerQt ({size_mb:.2f} MB) - Qt GUI")
+        except:
+            print(f"  ✅ Linux: AtlasInstallerQt - Qt GUI")
+    else:
+        print("  ❌ Linux: No se pudo compilar AtlasInstallerQt")
+    
+    print("\n💡 INSTRUCCIONES:")
+    print("  1. Windows: Usa AtlasInstaller.exe (requiere .NET Runtime)")
+    print("  2. Linux: Usa AtlasInstallerQt (requiere Qt5 libraries)")
+    print("  3. Sube ambos a Google Drive/GitHub")
+    print("  4. Actualiza los IDs en docs/download.js")
     print("=" * 50)
 
-# ========== PARTE NUEVA: APLICADOR DE PARCHES (PARA USUARIOS) ==========
+# ========== APLICADOR DE PARCHES (MANTENIDO) ==========
 class PatchApplier:
     """Sistema para aplicar parches (incluido en los instaladores)"""
     
@@ -356,33 +476,23 @@ class PatchApplier:
                 print(f"❌ Formato de parche no soportado: {patch_file}")
                 return False
             
-            # Leer metadatos
-            metadata_file = os.path.join(temp_dir, ".patch_metadata.json")
-            if os.path.exists(metadata_file):
-                with open(metadata_file, 'r') as f:
-                    metadata = json.load(f)
-                print(f"  Parche: {metadata.get('patch_name', 'N/A')}")
-                print(f"  Cambios: +{metadata['changes']['new']} ✏️{metadata['changes']['modified']} -{metadata['changes']['deleted']}")
-            
-            # Aplicar cambios (copiar archivos)
+            # Aplicar cambios
             patch_content_dir = os.path.join(temp_dir, os.listdir(temp_dir)[0] 
                                            if os.listdir(temp_dir) else "")
             
             if os.path.exists(patch_content_dir):
-                # Copiar todos los archivos
                 for root, dirs, files in os.walk(patch_content_dir):
                     for file in files:
-                        if file.startswith('.'):  # Omitir archivos ocultos/metadata
+                        if file.startswith('.'):
                             continue
                         
                         src_path = os.path.join(root, file)
                         rel_path = os.path.relpath(src_path, patch_content_dir)
                         dst_path = os.path.join(target_dir, rel_path)
                         
-                        # Crear directorio si no existe
                         os.makedirs(os.path.dirname(dst_path), exist_ok=True)
                         shutil.copy2(src_path, dst_path)
-                        
+                
                 print(f"  ✅ Archivos copiados: {sum(len(files) for _, _, files in os.walk(patch_content_dir))}")
             
             # Procesar eliminados
@@ -400,10 +510,6 @@ class PatchApplier:
             # Actualizar versión
             version_file = os.path.join(target_dir, ".version.json")
             version_data = {"last_updated": datetime.now().isoformat()}
-            if os.path.exists(metadata_file):
-                with open(metadata_file, 'r') as f:
-                    metadata = json.load(f)
-                version_data["version"] = metadata.get("version_to", "1.0.0")
             
             with open(version_file, 'w') as f:
                 json.dump(version_data, f, indent=2)
@@ -413,8 +519,6 @@ class PatchApplier:
             
         except Exception as e:
             print(f"❌ Error aplicando parche: {e}")
-            import traceback
-            traceback.print_exc()
             return False
             
         finally:
@@ -426,7 +530,11 @@ if __name__ == "__main__":
     # Determinar qué hacer basado en argumentos
     if len(sys.argv) > 1:
         if sys.argv[1] == "build":
-            build_installers()
+            build_installers(compiler='mono')
+        elif sys.argv[1] == "build-dotnet":
+            build_installers(compiler='dotnet')
+        elif sys.argv[1] == "build-mono":
+            build_installers(compiler='mono')
         elif sys.argv[1] in ["windows", "linux"]:
             patch_system = PatchSystem(platform=sys.argv[1])
             patch_system.run()
@@ -434,11 +542,24 @@ if __name__ == "__main__":
             print("Uso:")
             print("  Para crear parches: python create_patches.py [windows|linux]")
             print("  Para construir instaladores: python create_patches.py build")
+            print("  Para .NET SDK: python create_patches.py build-dotnet")
+            print("  Para Mono: python create_patches.py build-mono")
     else:
         print("📁 SISTEMA DE PARCHES Y CONSTRUCCIÓN")
         print("=" * 40)
         print("Opciones:")
         print("  1. Crear parche para Windows: python create_patches.py windows")
         print("  2. Crear parche para Linux: python create_patches.py linux")
-        print("  3. Construir instaladores: python create_patches.py build")
+        print("  3. Construir ambos instaladores: python create_patches.py build")
+        print("  4. Construir con .NET SDK: python create_patches.py build-dotnet")
+        print("  5. Construir con Mono: python create_patches.py build-mono")
+        print("\nNota: Ahora solo construye:")
+        print("  - Windows: AtlasInstaller.exe (C# GUI)")
+        print("  - Linux: AtlasInstallerQt (Qt GUI)")
         print("\nPrimero crea los parches, luego construye los instaladores.")
+
+
+
+
+
+# convert -size 64x64 xc:#2563eb -fill white -pointsize 24   -gravity center -draw "text 0,0 'Atlas'" icon.png
