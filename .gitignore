@@ -44,4 +44,4 @@ Thumbs.db
 # *.old
 # *~
 
-dev/mxe/
+dev/mxe/*
