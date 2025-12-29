@@ -43,5 +43,6 @@ Thumbs.db
 # *.bak
 # *.old
 # *~
-
+ 
 dev/mxe/
+dev/old_scripts/
