@@ -204,7 +204,7 @@ def build_linux_qt():
     print("\n🐧 Construyendo instalador Linux Qt...")
     
     # Verificar que exista el script de construcción Qt
-    qt_script = "build_qt_final.sh"
+    qt_script = "build_qt_linux1.sh"
     if not os.path.exists(qt_script):
         print(f"  ❌ No se encuentra: {qt_script}")
         print(f"  💡 Crea primero el script de construcción Qt")
@@ -225,6 +225,10 @@ def build_linux_qt():
         
         if result.returncode == 0:
             print("  ✅ Instalador Qt construido exitosamente")
+            print("output:\n", result.stdout)
+            os.system('rm build_qt_linux1.sh')
+            print('build_qt_linux1.sh eliminado')
+            print()
             
             # Verificar si se creó el archivo
             if os.path.exists("../AtlasInstallerQt"):
@@ -259,7 +263,7 @@ def build_installers(compiler='mono'):
     # 1. Windows (C#)
     print("\n🪟 Construyendo instalador Windows C#...")
     
-    cs_source = "AtlasInstaller.cs"
+    cs_source = "AtlasInstaller1.cs"
     if os.path.exists(cs_source):
         try:
             # Usar Mono si está disponible

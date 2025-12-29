@@ -1117,3 +1117,4 @@ else
 fi
 
 cd ..
+rm -r build_qt/

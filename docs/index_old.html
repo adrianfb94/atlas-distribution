@@ -164,6 +164,20 @@
               Para distribuciones basadas en Debian/Ubuntu
             </p>
 
+            <!-- <div class="platform-info">
+              <div class="info-item">
+                <i class="fas fa-file-archive"></i>
+                <span>Tamaño completo: <strong>13 GB</strong></span>
+              </div>
+              <div class="info-item">
+                <i class="fas fa-microchip"></i>
+                <span>Requisitos: 2GB RAM, 15GB espacio</span>
+              </div>
+              <div class="info-item">
+                <i class="fas fa-bolt"></i>
+                <span>AppImage - No requiere instalación</span>
+              </div>
+            </div> -->
             <div class="platform-info">
               <div class="info-item">
                 <i class="fas fa-file-archive"></i>
@@ -188,19 +202,11 @@
                 <a href="guide_linux.html" class="link">
                   <i class="fas fa-book"></i> Guía de instalación
                 </a>
-                <!-- <a
+                <a
                   href="https://drive.google.com/file/d/1vzAxSaKRXIPSNf937v6xjuBhRyrCiVRF/view?usp=drive_link"
                   class="link"
                   target="_blank"
-                > -->
-
-                <a
-                  href="https://drive.google.com/file/d/1zvvDKxBQOz5FrdKeOBHi9R3-8KCAjFG9/view?usp=drive_link"
-                  class="link"
-                  target="_blank"
                 >
-
-                
                   <i class="fas fa-external-link-alt"></i> Ver en Drive
                 </a>
               </div>
@@ -276,30 +282,20 @@
         </div>
 
         <div class="guide-content">
-          <!-- Windows Steps - CORREGIDO -->
+          <!-- Windows Steps -->
           <div class="guide-steps windows-steps active">
             <div class="step">
               <div class="step-number">1</div>
               <div class="step-content">
                 <h4>Descarga el instalador</h4>
                 <p>
-                  Haz clic en el botón para descargar
-                  <code>AtlasInstaller.exe</code> (20 KB) desde esta página.
+                  Ejecuta <code>AtlasInstaller.exe</code> (20 KB) desde esta
+                  página.
                 </p>
               </div>
             </div>
             <div class="step">
               <div class="step-number">2</div>
-              <div class="step-content">
-                <h4>Ejecuta el instalador</h4>
-                <p>
-                  Haz doble clic en el archivo descargado para iniciar la
-                  instalación.
-                </p>
-              </div>
-            </div>
-            <div class="step">
-              <div class="step-number">3</div>
               <div class="step-content">
                 <h4>Selecciona carpeta de instalación</h4>
                 <p>
@@ -308,7 +304,7 @@
               </div>
             </div>
             <div class="step">
-              <div class="step-number">4</div>
+              <div class="step-number">3</div>
               <div class="step-content">
                 <h4>Descarga automática</h4>
                 <p>
@@ -317,71 +313,121 @@
               </div>
             </div>
             <div class="step">
+              <div class="step-number">4</div>
+              <div class="step-content">
+                <h4>Extracción y limpieza</h4>
+                <p>
+                  Se extraerá y eliminará el archivo .zip, ahorrando espacio.
+                </p>
+              </div>
+            </div>
+            <div class="step">
               <div class="step-number">5</div>
               <div class="step-content">
                 <h4>¡Listo para usar!</h4>
                 <p>
-                  Se creará un acceso directo y podrás ejecutar
-                  <code>Atlas_Interactivo.exe</code>.
+                  Ejecuta <code>Atlas_Interactivo.exe</code> desde la carpeta
+                  creada.
                 </p>
               </div>
             </div>
           </div>
 
-          <!-- Linux Steps - MANTENIDO con consistencia -->
-          <div class="guide-steps linux-steps">
+          <!-- Linux Steps -->
+          <!-- <div class="guide-steps linux-steps">
             <div class="step">
               <div class="step-number">1</div>
               <div class="step-content">
-                <h4>Descarga el instalador Qt</h4>
+                <h4>Descarga el AppImage</h4>
                 <p>
-                  Haz clic en el botón para descargar
-                  <code>AtlasInstallerQt</code> desde esta página.
+                  Descarga <code>AtlasInstaller.AppImage</code> y hazlo
+                  ejecutable.
                 </p>
               </div>
             </div>
             <div class="step">
               <div class="step-number">2</div>
               <div class="step-content">
-                <h4>Hazlo ejecutable</h4>
+                <h4>Ejecuta el instalador</h4>
                 <p>
-                  Ejecuta en terminal: <code>chmod +x AtlasInstallerQt</code>
+                  <code
+                    >chmod +x AtlasInstaller.AppImage &&
+                    ./AtlasInstaller.AppImage</code
+                  >
                 </p>
               </div>
             </div>
             <div class="step">
               <div class="step-number">3</div>
               <div class="step-content">
-                <h4>Ejecuta el instalador</h4>
-                <p>
-                  Ejecuta en terminal: <code>./AtlasInstallerQt</code> (interfaz
-                  gráfica Qt)
-                </p>
+                <h4>Selecciona ubicación</h4>
+                <p>Elige la carpeta de destino (necesitas 15GB libres).</p>
               </div>
             </div>
             <div class="step">
               <div class="step-number">4</div>
               <div class="step-content">
-                <h4>Descarga automática</h4>
-                <p>El instalador descargará 13GB desde Google Drive.</p>
+                <h4>Descarga en segundo plano</h4>
+                <p>El instalador descargará 13GB automáticamente.</p>
               </div>
             </div>
             <div class="step">
               <div class="step-number">5</div>
               <div class="step-content">
-                <h4>¡Listo para usar!</h4>
-                <p>
-                  Ejecuta el programa desde el menú de aplicaciones o terminal.
-                </p>
+                <h4>Acceso directo</h4>
+                <p>Se crearán accesos directos en el menú de aplicaciones.</p>
               </div>
             </div>
-          </div>
+          </div> -->
+
+            <div class="guide-steps linux-steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h4>Descarga el instalador Qt</h4>
+                        <p>Descarga <code>AtlasInstallerQt</code> desde esta página.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h4>Hazlo ejecutable</h4>
+                        <p><code>chmod +x AtlasInstallerQt</code></p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h4>Ejecuta el instalador</h4>
+                        <p><code>./AtlasInstallerQt</code> (interfaz gráfica Qt)</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <h4>Descarga automática</h4>
+                        <p>El instalador descargará 13GB desde Google Drive.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">5</div>
+                    <div class="step-content">
+                        <h4>Extracción y limpieza</h4>
+                        <p>Se extrae el archivo .tar y se elimina automáticamente.</p>
+                    </div>
+                </div>
+            </div>
+
+
         </div>
 
         <div class="guide-actions">
+          <!-- CORRECCIÓN AQUÍ: Cambiar a rutas absolutas -->
+          <!-- <a href="/guide_windows" class="btn-secondary"> -->
           <a href="guide_windows.html" class="btn-secondary">
             <i class="fas fa-file-alt"></i> Guía Windows Completa
           </a>
+          <!-- <a href="/guide_linux" class="btn-secondary"> -->
           <a href="guide_linux.html" class="btn-secondary">
             <i class="fas fa-file-alt"></i> Guía Linux Completa
           </a>

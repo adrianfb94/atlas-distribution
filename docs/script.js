@@ -93,29 +93,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
-    
-    // // Download button handlers (will be connected to download.js)
-    // const downloadButtons = document.querySelectorAll('.download-btn');
-    
-    // downloadButtons.forEach(button => {
-    //     button.addEventListener('click', function() {
-    //         const platform = this.getAttribute('data-platform');
-    //         console.log(`Iniciando descarga para ${platform}`);
-            
-    //         // Show progress container
-    //         const progressContainer = document.getElementById(`${platform}-progress`);
-    //         progressContainer.classList.remove('hidden');
-            
-    //         // Disable button during download
-    //         this.disabled = true;
-    //         this.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Descargando...`;
-            
-    //         // In a real implementation, this would call download.js functions
-    //         // For now, simulate a download
-    //         // simulateDownload(platform, progressContainer, this);
-    //     });
-    // });
-    
+        
     // Simulate download (for demo purposes)
     function simulateDownload(platform, progressContainer, button) {
         const progressFill = progressContainer.querySelector('.progress-fill');
