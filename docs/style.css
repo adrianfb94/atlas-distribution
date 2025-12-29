@@ -1075,3 +1075,73 @@ body {
 .hidden {
     display: none !important;
 }
+
+
+/* Agrega esto al final de tu style.css */
+
+/* Estilos consistentes para código */
+code {
+    background: var(--bg-secondary);
+    color: var(--text-color);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'Courier New', Consolas, Monaco, monospace;
+    font-size: 0.9em;
+    border: 1px solid var(--border-color);
+}
+
+/* Para bloques de código más grandes */
+.code-block {
+    background: var(--bg-secondary);
+    padding: 1.5rem;
+    border-radius: var(--radius);
+    font-family: 'Courier New', Consolas, Monaco, monospace;
+    margin: 1rem 0;
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+}
+
+.code-block code {
+    background: transparent;
+    padding: 0;
+    border: none;
+    font-size: 1em;
+}
+
+
+/* ESTO VA EN style.css - aplica a todo el sitio */
+
+/* Estilo base para código inline */
+code {
+    background: rgba(var(--primary-rgb), 0.1);
+    color: var(--primary-color);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'Courier New', Consolas, Monaco, monospace;
+    font-size: 0.9em;
+    border: 1px solid rgba(var(--primary-rgb), 0.2);
+    font-weight: 500;
+}
+
+/* Variables CSS para colores (agrega al inicio de style.css) */
+:root {
+    --primary-rgb: 37, 99, 235; /* Azul para Windows */
+    --primary-color: #2563eb;
+}
+
+[data-theme="dark"] code {
+    background: rgba(37, 99, 235, 0.15);
+    border-color: rgba(37, 99, 235, 0.3);
+}
+
+/* Para guía Linux, sobrescribe en su <style> interno */
+.linux-guide code {
+    background: rgba(241, 80, 47, 0.1);
+    color: #f1502f;
+    border-color: rgba(241, 80, 47, 0.2);
+}
+
+[data-theme="dark"] .linux-guide code {
+    background: rgba(241, 80, 47, 0.15);
+    border-color: rgba(241, 80, 47, 0.3);
+}
