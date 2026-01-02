@@ -211,6 +211,32 @@ def build_linux_qt():
         return False
     
     try:
+        # ========== LIMPIAR ANTES ==========
+        print("  🧹 Limpiando archivos anteriores...")
+        cleanup_files = [
+            "../AtlasInstallerQt",
+            "build_qt",
+            "moc_*",
+            "*.o",
+            "*.so",
+            "*.moc",
+            "ui_*",
+            "Makefile*"
+        ]
+        
+        import glob
+        for pattern in cleanup_files:
+            for file in glob.glob(pattern):
+                try:
+                    if os.path.isdir(file):
+                        shutil.rmtree(file, ignore_errors=True)
+                    else:
+                        os.remove(file)
+                except:
+                    pass
+ 
+ 
+ 
         # Dar permisos de ejecución
         os.chmod(qt_script, 0o755)
         
@@ -256,6 +282,30 @@ def build_installers(compiler='mono'):
     print("🔨 CONSTRUYENDO INSTALADORES (Windows C# + Linux Qt)")
     print("=" * 50)
     
+    # # 0. En Linux con MinGW
+    # print("\n🪟 Construyendo instalador Windows C...")
+
+    # # Primero escribir el archivo C
+    # c_source = "AtlasInstallerBasic.c"
+
+    # # Compilar con MinGW
+    # compile_result = os.system(
+    #     f'x86_64-w64-mingw32-gcc -o AtlasInstallerBasic.exe {c_source} '
+    #     '-lwininet -lcomctl32 -lshell32 -lole32 -lcomdlg32 -luuid -mwindows -O2 -s -static'
+    # )
+
+    # if compile_result == 0:
+    #     size_bytes = os.path.getsize("AtlasInstallerBasic.exe")
+    #     size_kb = size_bytes / 1024
+    #     print(f"  ✅ AtlasInstallerBasic.exe creado ({size_kb:.1f} KB) - WinAPI")
+        
+    #     # Copiar al directorio padre
+    #     shutil.copy("AtlasInstallerBasic.exe", "../AtlasInstallerBasic.exe")
+    # else:
+    #     print("  ❌ Error compilando AtlasInstallerBasic.exe")
+
+
+
     # 1. Windows (C#)
     print("\n🪟 Construyendo instalador Windows C#...")
     
@@ -265,6 +315,7 @@ def build_installers(compiler='mono'):
             # Usar Mono si está disponible
             if shutil.which("mcs") and compiler == 'mono':
                 print("  Compilando con Mono (mcs)...")
+
                 subprocess.run([
                     "mcs", "-target:winexe",
                     "-out:../AtlasInstaller.exe",
@@ -276,6 +327,8 @@ def build_installers(compiler='mono'):
                     "-optimize",
                     cs_source
                 ], check=True)
+
+
                 print("  ✅ AtlasInstaller.exe creado")
                 
             elif shutil.which("dotnet") and compiler == 'dotnet':

@@ -12,6 +12,81 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+
+# ========== AÑADE ESTA FUNCIÓN AL PRINCIPIO ==========
+clean_qt_files() {
+    echo "🧹 Limpiando archivos Qt residuales..."
+    
+    # Directorio actual y padre
+    CURRENT_DIR="$(dirname "$0")"
+    PARENT_DIR="$(dirname "$CURRENT_DIR")"
+    
+    # Limpiar en directorio actual
+    find "$CURRENT_DIR" -name "moc_*" -delete 2>/dev/null || true
+    find "$CURRENT_DIR" -name "*.o" -delete 2>/dev/null || true
+    find "$CURRENT_DIR" -name "*.so" -delete 2>/dev/null || true
+    find "$CURRENT_DIR" -name "*.moc" -delete 2>/dev/null || true
+    find "$CURRENT_DIR" -name "ui_*" -delete 2>/dev/null || true
+    find "$CURRENT_DIR" -name "Makefile*" -delete 2>/dev/null || true
+    
+    # Limpiar en directorio padre
+    find "$PARENT_DIR" -name "moc_*" -delete 2>/dev/null || true
+    find "$PARENT_DIR" -name "*.o" -delete 2>/dev/null || true
+    find "$PARENT_DIR" -name "*.so" -delete 2>/dev/null || true
+    find "$PARENT_DIR" -name "*.moc" -delete 2>/dev/null || true
+    find "$PARENT_DIR" -name "ui_*" -delete 2>/dev/null || true
+    find "$PARENT_DIR" -name "Makefile*" -delete 2>/dev/null || true
+    
+    # Eliminar directorios de compilación
+    rm -rf "$CURRENT_DIR/build_qt" 2>/dev/null || true
+    rm -rf "$PARENT_DIR/build_qt" 2>/dev/null || true
+    
+    # Eliminar ejecutables anteriores
+    rm -f "$PARENT_DIR/AtlasInstallerQt" 2>/dev/null || true
+    rm -f "$PARENT_DIR/AtlasInstaller.exe" 2>/dev/null || true
+    rm -f "$PARENT_DIR/AtlasInstaller_dotnet.exe" 2>/dev/null || true
+    
+    echo "✅ Limpieza completada"
+
+
+
+    # Archivos temporales de compilación
+    rm -rf build_qt 2>/dev/null
+    rm -rf moc_* 2>/dev/null
+    rm -rf ui_* 2>/dev/null
+    rm -rf *.o 2>/dev/null
+    rm -rf *.so 2>/dev/null
+    rm -rf *.moc 2>/dev/null
+    rm -rf Makefile* 2>/dev/null
+
+    # Archivos generados por qmake
+    rm -f .qmake.stash 2>/dev/null
+    rm -f AtlasInstaller.pro.user* 2>/dev/null
+
+    # Binarios antiguos
+    rm -f AtlasInstallerQt 2>/dev/null
+    rm -f AtlasInstaller 2>/dev/null
+
+    # Directorios temporales
+    rm -rf debug 2>/dev/null
+    rm -rf release 2>/dev/null
+
+    echo "✅ Limpieza completada"
+
+    # Mostrar espacio liberado
+    echo ""
+    echo "📁 Directorio actual:"
+    ls -la | grep -E "\.(o|moc|so|pro\.user|Makefile)" || echo "✅ No hay archivos temporales"
+
+    # Tamaño del directorio actual
+    echo ""
+    echo "📊 Tamaño del directorio:"
+    du -sh .
+
+
+}
+
+
 # Función para mostrar estado
 status() {
     echo -e "${BLUE}[*]${NC} $1"
@@ -73,6 +148,12 @@ else
     warning "qmake no encontrado - no se puede construir Qt"
     warning "  Instalar: sudo apt install qt5-default qttools5-dev-tools"
 fi
+
+
+# ========== AÑADE ESTO ANTES DE CONSTRUIR ==========
+# 2.5. Limpiar archivos residuales
+clean_qt_files
+
 
 # 3. Construir AMBOS instaladores con create_patches.py
 status "Construyendo todos los instaladores..."
@@ -388,7 +469,7 @@ echo ""
 echo "🔧 COMANDOS ÚTILES:"
 echo "   Para reconstruir todo: ./dev/build_installers.sh"
 echo "   Para subir a GitHub: gh release create vX.X.X upload2github/*"
-echo "   Solo Qt: ./dev/build_qt_linux.sh"
+echo "   Solo Qt: ./dev/AtlasInstallerQt.sh"
 echo ""
 echo "💡 CONSEJO:"
 echo "   Si hay problemas con Qt, instala:"

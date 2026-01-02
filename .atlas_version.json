@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "installed": true,
+  "install_path": "/home/adrianfb/Documents/ABEL/adrian/atlas/Atlas_Distribution",
+  "install_date": "2025-12-29T17:01:43",
+  "file_type": "tar",
+  "download_size": "variable",
+  "download_resumable": true,
+  "download_attempts": 1,
+  "extraction_method": "incremental_groups"
+}
