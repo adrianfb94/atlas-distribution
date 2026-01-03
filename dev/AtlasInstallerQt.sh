@@ -1,17 +1,28 @@
 #!/bin/bash
-# Script para construir el instalador Qt - VERSIÓN CORREGIDA
+# Script para construir el instalador Qt - VERSIÓN FINAL CORREGIDA
 
-echo "🔨 Construyendo instalador Qt con correcciones..."
+echo "🔨 Construyendo instalador Qt con manejo de cierre corregido..."
+echo "🖥️  Configuración optimizada para pantallas de alta resolución"
+echo "📦 Usando Qt 5 (compatible con Ubuntu/Debian)"
 
-# Limpiar
-rm -rf build_qt
-rm -f ../AtlasInstallerQt
+# ========== VERIFICAR VERSIÓN DE Qt ==========
+echo "🔍 Verificando versión de Qt..."
+QT_VERSION=$(qmake -query QT_VERSION 2>/dev/null || echo "0")
+echo "   Versión Qt detectada: $QT_VERSION"
 
-# Crear directorio
+# ========== LIMPIAR ARCHIVOS ANTERIORES ==========
+echo "🧹 Limpiando archivos anteriores..."
+rm -rf build_qt 2>/dev/null
+rm -f ../AtlasInstallerQt 2>/dev/null
+rm -f ../AtlasInstallerQt_dpi 2>/dev/null
+rm -f moc_* *.o *.so *.moc ui_* Makefile* .qmake.stash 2>/dev/null || true
+
+# ========== CREAR DIRECTORIO DE CONSTRUCCIÓN ==========
 mkdir -p build_qt
 cd build_qt
 
-# Crear archivos .pro con soporte DPI
+# ========== CREAR ARCHIVO .pro COMPATIBLE CON Qt 5 ==========
+echo "📝 Creando proyecto Qt compatible con Qt 5..."
 cat > AtlasInstaller.pro << 'EOF'
 QT += core gui widgets network
 CONFIG += c++11
@@ -20,51 +31,221 @@ TEMPLATE = app
 SOURCES = main.cpp installerwindow.cpp
 HEADERS = installerwindow.h
 
-# Mejorar escalado en alta DPI
-greaterThan(QT_MAJOR_VERSION, 5): QT += widgets
-greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
+# Optimizaciones
+CONFIG += release
+QMAKE_CXXFLAGS += -O2 -pipe
+QMAKE_LFLAGS += -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now
 
-# Habilitar escalado automático
+# Soporte DPI mejorado (compatible con Qt 5.6+)
 DEFINES += QT_AUTO_SCREEN_SCALE_FACTOR=1
+
+# Requerir Qt 5.6+ para DPI
+greaterThan(QT_MAJOR_VERSION, 5) {
+    # Qt 6 o superior
+    QT += widgets
+    DEFINES += QT_VERSION_6_PLUS
+} else:equals(QT_MAJOR_VERSION, 5) {
+    # Qt 5
+    QT += widgets
+    
+    # Verificar versión menor para DPI
+    QT_MINOR_VERSION = $$system(qmake -query QT_VERSION | cut -d. -f2)
+    greaterThan(QT_MINOR_VERSION, 5) {
+        # Qt 5.6 o superior
+        DEFINES += QT_VERSION_5_6_PLUS
+        message("Compilando con Qt 5.6+ - Soporte DPI completo")
+    } else {
+        # Qt 5.5 o inferior
+        message("Compilando con Qt 5.5 o inferior - Soporte DPI limitado")
+    }
+}
+
+# Deshabilitar advertencias específicas
+QMAKE_CXXFLAGS += -Wno-deprecated-declarations
 EOF
 
-# main.cpp (se mantiene igual)
+# ========== CREAR main.cpp ==========
+echo "📝 Creando main.cpp..."
 cat > main.cpp << 'EOF'
 #include "installerwindow.h"
 #include <QApplication>
 #include <QDir>
 #include <QDebug>
+#include <QStyleFactory>
+#include <QFont>
+#include <QScreen>
+#include <QMessageBox>
+#include <QTimer>
+
+// Función para mostrar advertencia DPI (opcional)
+void showDPIInfo(QScreen* screen) {
+    qDebug() << "🖥️  Información de pantalla:";
+    qDebug() << "   - DPI lógico:" << screen->logicalDotsPerInch();
+    qDebug() << "   - DPI físico:" << screen->physicalDotsPerInch();
+    qDebug() << "   - Ratio:" << screen->devicePixelRatio();
+    qDebug() << "   - Tamaño:" << screen->size();
+    qDebug() << "   - Tamaño disponible:" << screen->availableSize();
+}
 
 int main(int argc, char *argv[])
 {
-    QApplication app(argc, argv);
-    app.setApplicationName("Atlas Installer");
+    // ========== CONFIGURACIÓN DE DPI ==========
     
-    // Configurar escalado para alta DPI
-    QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-    QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+    // Configurar variables de entorno para DPI
+    qputenv("QT_AUTO_SCREEN_SCALE_FACTOR", "1");
+    qputenv("QT_SCALE_FACTOR", "1");
     
-    // Procesar argumentos de línea de comandos ANTES de crear la ventana
-    QString installDir = QDir::homePath() + "/Atlas_Interactivo";
-    
+    // Procesar argumentos de DPI desde línea de comandos
+    bool disableDPIScaling = false;
+    QString customScaleFactor = "";
+    bool forceX11 = false;
+    bool forceWayland = false;
+
     for (int i = 1; i < argc; ++i) {
         QString arg = QString(argv[i]);
+        
+        if (arg == "--no-dpi-scaling") {
+            disableDPIScaling = true;
+            qputenv("QT_AUTO_SCREEN_SCALE_FACTOR", "0");
+        }
+        
+        if (arg == "--scale-factor" && i + 1 < argc) {
+            customScaleFactor = QString(argv[i + 1]);
+            i++;
+            qputenv("QT_SCALE_FACTOR", customScaleFactor.toUtf8());
+            qDebug() << "🔧 Factor de escala personalizado:" << customScaleFactor;
+        }
+        
+        if (arg == "--force-x11") {
+            forceX11 = true;
+            qputenv("QT_QPA_PLATFORM", "xcb");
+        }
+        
+        if (arg == "--force-wayland") {
+            forceWayland = true;
+            qputenv("QT_QPA_PLATFORM", "wayland");
+        }
+        
+        if (arg == "--dpi-info") {
+            // Mostrar información DPI después de crear QApplication
+            QTimer::singleShot(100, []() {
+                QScreen* screen = QGuiApplication::primaryScreen();
+                if (screen) {
+                    QMessageBox::information(nullptr, "Información DPI",
+                        QString("Información de pantalla:\n\n"
+                               "• DPI lógico: %1\n"
+                               "• DPI físico: %2\n"
+                               "• Ratio de píxeles: %3\n"
+                               "• Resolución: %4×%5\n"
+                               "• Tamaño disponible: %6×%7\n\n"
+                               "Variables DPI activas:\n"
+                               "• QT_AUTO_SCREEN_SCALE_FACTOR: %8\n"
+                               "• QT_SCALE_FACTOR: %9")
+                        .arg(screen->logicalDotsPerInch())
+                        .arg(screen->physicalDotsPerInch())
+                        .arg(screen->devicePixelRatio())
+                        .arg(screen->size().width())
+                        .arg(screen->size().height())
+                        .arg(screen->availableSize().width())
+                        .arg(screen->availableSize().height())
+                        .arg(qgetenv("QT_AUTO_SCREEN_SCALE_FACTOR").constData())
+                        .arg(qgetenv("QT_SCALE_FACTOR").constData()));
+                }
+            });
+        }
         
         if (arg == "--help" || arg == "-h") {
             qInfo() << "AtlasInstallerQt - Instalador para Linux";
             qInfo() << "Uso: ./AtlasInstallerQt [OPCIONES]";
-            qInfo() << "Opciones:";
-            qInfo() << "  --help, -h     Mostrar esta ayuda";
-            qInfo() << "  --version, -v  Mostrar versión";
+            qInfo() << "";
+            qInfo() << "Opciones generales:";
+            qInfo() << "  --help, -h          Mostrar esta ayuda";
+            qInfo() << "  --version, -v       Mostrar versión";
             qInfo() << "  --install-dir PATH  Directorio de instalación";
             qInfo() << "  --skip-desktop      No crear accesos directos";
+            qInfo() << "  --check-updates     Verificar actualizaciones";
+            qInfo() << "";
+            qInfo() << "Opciones de DPI/Pantalla:";
+            qInfo() << "  --no-dpi-scaling    Deshabilitar escalado DPI (no recomendado)";
+            qInfo() << "  --scale-factor NUM  Factor de escala personalizado (ej: 1.5)";
+            qInfo() << "  --force-x11         Forzar modo X11";
+            qInfo() << "  --force-wayland     Forzar modo Wayland";
+            qInfo() << "  --dpi-info          Mostrar información de pantalla";
+            qInfo() << "";
+            qInfo() << "Ejemplos:";
+            qInfo() << "  ./AtlasInstallerQt                     # Normal con DPI automático";
+            qInfo() << "  ./AtlasInstallerQt --scale-factor 1.5  # Escala 150%";
+            qInfo() << "  ./AtlasInstallerQt --force-x11         # Forzar X11";
+            qInfo() << "  ./AtlasInstallerQt --dpi-info          # Mostrar info técnica";
             return 0;
         }
         
         if (arg == "--version" || arg == "-v") {
-            qInfo() << "AtlasInstallerQt v1.0.0";
+            qInfo() << "AtlasInstallerQt v2.0.0";
             qInfo() << "Compilado con Qt" << QT_VERSION_STR;
+            qInfo() << "Soporte DPI: ACTIVADO (variables de entorno)";
+            qInfo() << "Plataforma: Qt Widgets";
             return 0;
+        }
+    }
+    
+    // Crear la aplicación
+    QApplication app(argc, argv);
+    
+    // Configurar estilo de aplicación
+    app.setStyle(QStyleFactory::create("Fusion"));
+    
+    // Configurar información de aplicación
+    app.setApplicationName("Atlas Installer");
+    app.setApplicationDisplayName("Atlas Interactivo Installer");
+    app.setOrganizationName("Atlas Interactive");
+    
+    // Configurar paleta y fuente por defecto
+    QFont defaultFont = QApplication::font();
+    
+    // Ajustar tamaño de fuente basado en DPI
+    QScreen* primaryScreen = QGuiApplication::primaryScreen();
+    if (primaryScreen) {
+        showDPIInfo(primaryScreen);
+        
+        double dpiScale = primaryScreen->logicalDotsPerInch() / 96.0;
+        if (dpiScale > 1.0 && !disableDPIScaling) {
+            int newSize = qRound(defaultFont.pointSize() * dpiScale * 0.9);
+            if (newSize > 8 && newSize < 16) {
+                defaultFont.setPointSize(newSize);
+                qDebug() << "🔍 Ajustando fuente a:" << newSize << "pt (DPI:" << dpiScale << ")";
+            }
+        }
+    }
+    
+    QApplication::setFont(defaultFont);
+    
+    // Mostrar información de DPI en log
+    if (!disableDPIScaling) {
+        qDebug() << "✅ Escalado DPI automático: ACTIVADO";
+        qDebug() << "   Configuración DPI:";
+        qDebug() << "   - QT_AUTO_SCREEN_SCALE_FACTOR:" << qgetenv("QT_AUTO_SCREEN_SCALE_FACTOR").constData();
+        qDebug() << "   - QT_SCALE_FACTOR:" << qgetenv("QT_SCALE_FACTOR").constData();
+    } else {
+        qDebug() << "⚠️  Escalado DPI automático: DESACTIVADO (--no-dpi-scaling)";
+    }
+    
+    // ========== PROCESAR ARGUMENTOS RESTANTES ==========
+    
+    QString installDir = QDir::homePath() + "/Atlas_Interactivo";
+    bool skipDesktop = false;
+    
+    // Procesar argumentos de instalación (manejar aquí los no-DPI)
+    for (int i = 1; i < argc; ++i) {
+        QString arg = QString(argv[i]);
+        
+        // Saltar argumentos DPI que ya procesamos
+        if (arg == "--no-dpi-scaling" || arg == "--scale-factor" || 
+            arg == "--force-x11" || arg == "--force-wayland" || 
+            arg == "--dpi-info") {
+            // Si era --scale-factor, saltar el valor también
+            if (arg == "--scale-factor") i++;
+            continue;
         }
         
         if (arg == "--install-dir" && i + 1 < argc) {
@@ -85,10 +266,27 @@ int main(int argc, char *argv[])
             return 0;
         }
 
-        // --skip-desktop se manejará en la ventana principal
+        if (arg == "--skip-desktop") {
+            skipDesktop = true;
+        }
     }
     
-    // Crear ventana principal
+
+    // Verificar que el directorio de instalación sea válido
+    if (installDir.isEmpty()) {
+        installDir = QDir::homePath() + "/Atlas_Interactivo";
+        qWarning() << "⚠️  Directorio de instalación estaba vacío, usando:" << installDir;
+    }
+
+    // Verificar que no haya rutas con caracteres especiales
+    if (installDir.contains("//") || installDir.endsWith("/")) {
+        installDir = QDir::cleanPath(installDir);
+    }
+
+
+    // ========== CREAR VENTANA PRINCIPAL ==========
+    
+    qDebug() << "🚀 Creando ventana principal...";
     InstallerWindow window;
     
     // Configurar directorio si se especificó
@@ -96,21 +294,22 @@ int main(int argc, char *argv[])
         window.setInstallDir(installDir);
     }
     
-    // Verificar --skip-desktop
-    for (int i = 1; i < argc; ++i) {
-        if (QString(argv[i]) == "--skip-desktop") {
-            window.setSkipDesktopShortcuts(true);
-            break;
-        }
+    // Configurar opciones de acceso directo
+    if (skipDesktop) {
+        window.setSkipDesktopShortcuts(true);
     }
     
+    // Mostrar ventana
     window.show();
+    
+    qDebug() << "✅ Aplicación iniciada correctamente con soporte DPI";
     
     return app.exec();
 }
 EOF
 
-# installerwindow.h - AÑADIR QScrollArea
+# ========== CREAR installerwindow.h CORREGIDO ==========
+echo "📝 Creando installerwindow.h corregido..."
 cat > installerwindow.h << 'EOF'
 #ifndef INSTALLERWINDOW_H
 #define INSTALLERWINDOW_H
@@ -127,7 +326,10 @@ cat > installerwindow.h << 'EOF'
 #include <QGroupBox>
 #include <QScrollArea>
 
+// Solo declaraciones forward
+class InstallWorker;
 class QNetworkAccessManager;
+class QThread;
 
 class InstallerWindow : public QMainWindow
 {
@@ -139,8 +341,8 @@ public:
     // Métodos para configuración desde CLI
     void setInstallDir(const QString &dir);
     void setSkipDesktopShortcuts(bool skip);
+    bool isInstalling() const { return m_isInstalling; }
     
-
 
 private slots:
     void browseDirectory();
@@ -149,7 +351,11 @@ private slots:
     void installationFinished(bool success, const QString &message);
     void clearLog();
     void updateDiskSpace();
-    
+    void cancelCurrentInstallation();
+
+protected:
+    void closeEvent(QCloseEvent *event) override;
+
 private:
     void setupUI();
     bool checkDiskSpace();
@@ -186,6 +392,11 @@ private:
     double dpiScale;
     bool m_hasSufficientSpace;
     
+    // Variables para controlar la instalación
+    InstallWorker *currentWorker;
+    QThread *currentThread;
+    bool m_isInstalling;
+    
     // Timer para actualizar espacio en disco
     QTimer *diskSpaceTimer;
 };
@@ -193,8 +404,10 @@ private:
 #endif
 EOF
 
-# installerwindow.cpp - VERSIÓN CORREGIDA
+# ========== CREAR installerwindow.cpp CORREGIDO ==========
+echo "📝 Creando installerwindow.cpp corregido..."
 cat > installerwindow.cpp << 'EOF'
+#include <QUuid>
 #include "installerwindow.h"
 #include <QFileDialog>
 #include <QMessageBox>
@@ -224,7 +437,7 @@ cat > installerwindow.cpp << 'EOF'
 
 #include <sys/statvfs.h>
 
-// Clase Worker CORREGIDA
+// Clase Worker (mantener igual)
 class InstallWorker : public QObject {
     Q_OBJECT
     
@@ -233,12 +446,85 @@ public:
         : m_installDir(installDir), m_driveId(driveId), m_canceled(false), m_downloadAttempts(0) {}
     
     ~InstallWorker() {
+        // Marcar como cancelado para evitar nuevos procesos
+        m_canceled = true;
+        
+        // Esperar un momento para que cualquier proceso termine
+        QThread::msleep(100);
+        
+        // Limpiar archivo temporal si existe
         if (!m_tempArchive.isEmpty() && QFile::exists(m_tempArchive)) {
             QFile::remove(m_tempArchive);
         }
-    }
-    
+        
+        // Limpiar otros archivos temporales de manera segura
+        QString tempDir = QDir::tempPath();
+        if (!tempDir.isEmpty()) {
+            QDir temp(tempDir);
+            // Solo limpiar archivos específicos que creamos
+            QStringList ourFiles = temp.entryList(QStringList() 
+                << "gdrive_" + QUuid::createUuid().toString().mid(1, 8) + "*"
+                << "tar_list_" + QUuid::createUuid().toString().mid(1, 8) + "*",
+                QDir::Files);
+            
+            foreach (const QString &file, ourFiles) {
+                QString filePath = tempDir + "/" + file;
+                if (!filePath.isEmpty() && QFile::exists(filePath)) {
+                    QFile::remove(filePath);
+                }
+            }
+        }
+    } 
+
 public slots:
+    void cleanupProcesses() {
+        if (!m_canceled) {
+            m_canceled = true;
+            
+            qDebug() << "Worker: Iniciando limpieza de procesos...";
+            
+            // Terminar cualquier proceso pendiente de manera segura
+            QProcess killProcess;
+            
+            // Lista de comandos para matar procesos
+            QStringList killCommands = {
+                "pkill -f \"wget.*google\"",
+                "pkill -f \"curl.*google\"",
+                "pkill -f \"tar.*atlas\"",
+                "killall -9 wget 2>/dev/null",
+                "killall -9 curl 2>/dev/null"
+            };
+            
+            foreach (const QString &cmd, killCommands) {
+                killProcess.start("bash", QStringList() << "-c" << cmd);
+                if (killProcess.waitForStarted(500)) {
+                    killProcess.waitForFinished(1000);
+                }
+            }
+            
+            // Limpiar archivos temporales
+            if (!m_tempArchive.isEmpty() && QFile::exists(m_tempArchive)) {
+                for (int attempt = 0; attempt < 3; attempt++) {
+                    if (QFile::remove(m_tempArchive)) {
+                        qDebug() << "Worker: Archivo temporal eliminado:" << m_tempArchive;
+                        break;
+                    }
+                    QThread::msleep(100);
+                }
+                m_tempArchive.clear();
+            }
+            
+            // Sincronizar disco
+            QProcess syncProcess;
+            syncProcess.start("sync", QStringList());
+            syncProcess.waitForFinished(500);
+            
+            qDebug() << "Worker: Limpieza completada";
+            
+            emit logMessage("🧹 Procesos y archivos temporales limpiados");
+        }
+    }
+
     void doWork() {
         emit logMessage("Iniciando descarga de Atlas Interactivo...");
         emit logMessage("Esto puede tomar tiempo dependiendo de tu conexión.");
@@ -278,7 +564,7 @@ public slots:
         emit logMessage(QString("✅ Descarga completada: %1 bytes").arg(fileInfo.size()));
         emit progressUpdated(50, "Descarga completada");
         
-        // MÉTODO ACTUALIZADO: Extraer en grupos manteniendo el .tar completo
+        // Extraer archivos
         emit progressUpdated(60, "Extrayendo archivos...");
         emit logMessage("Extrayendo archivo .tar en grupos...");
         
@@ -312,7 +598,7 @@ public slots:
         // Crear archivo de versión
         createVersionFile();
         
-        // Limpiar archivo temporal (¡IMPORTANTE!)
+        // Limpiar archivo temporal
         QFile::remove(m_tempArchive);
         m_tempArchive.clear();
         
@@ -328,41 +614,92 @@ public slots:
     }
     
     void cancel() {
-        m_canceled = true;
-        if (!m_tempArchive.isEmpty() && QFile::exists(m_tempArchive)) {
-            QFile::remove(m_tempArchive);
-        }
+        cleanupProcesses();
     }
     
 private:
     QString getDirectDownloadUrl() {
-        return QString("https://drive.google.com/uc?id=%1&export=download&confirm=t&uuid=").arg(m_driveId) +
-               QUuid::createUuid().toString().remove('{').remove('}');
+        bool useLocal = false; // Cambiar a false para usar Google Drive real
+        
+        if (useLocal) {
+            emit logMessage("🔧 USANDO SERVIDOR LOCAL para pruebas");
+            return "http://localhost:8000/Atlas_Interactivo_Linux.tar";
+        } else {
+            emit logMessage("🌐 Descargando desde Google Drive...");
+            QString baseUrl = QString("https://drive.google.com/uc?id=%1&export=download").arg(m_driveId);
+            
+            // Intentar obtener el token de confirmación para archivos grandes
+            QProcess wgetProcess;
+            QStringList wgetArgs;
+            wgetArgs << "--no-check-certificate";
+            wgetArgs << "--save-cookies" << "/tmp/cookies.txt";
+            wgetArgs << "--keep-session-cookies";
+            wgetArgs << "-O" << "/tmp/gdrive_response.html";
+            wgetArgs << baseUrl;
+            
+            wgetProcess.start("wget", wgetArgs);
+            wgetProcess.waitForFinished(10000);
+            
+            // Leer la respuesta para buscar el token confirm
+            QFile responseFile("/tmp/gdrive_response.html");
+            QString confirmToken;
+            
+            if (responseFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                QTextStream in(&responseFile);
+                QString content = in.readAll();
+                responseFile.close();
+                
+                // Buscar el token de confirmación
+                QRegularExpression re("confirm=([0-9A-Za-z_-]+)");
+                QRegularExpressionMatch match = re.match(content);
+                if (match.hasMatch()) {
+                    confirmToken = match.captured(1);
+                    emit logMessage("✅ Token de confirmación obtenido: " + confirmToken);
+                } else {
+                    confirmToken = "t";
+                    emit logMessage("⚠️  Usando token de confirmación por defecto");
+                }
+            } else {
+                confirmToken = "t"; // Fallback
+            }
+            
+            // Construir URL con token de confirmación
+            QString finalUrl = QString("https://drive.google.com/uc?id=%1&export=download&confirm=%2")
+                                .arg(m_driveId).arg(confirmToken);
+            
+            // Limpiar archivos temporales
+            QFile::remove("/tmp/cookies.txt");
+            QFile::remove("/tmp/gdrive_response.html");
+            
+            return finalUrl;
+        }
     }
     
-    // Descarga con reintentos y resumible
     bool downloadWithRetries(const QString &url, const QString &outputPath, int maxAttempts) {
         m_downloadAttempts = 0;
         
+        if (url.contains("drive.google.com")) {
+            emit logMessage("🔍 Detectado archivo grande de Google Drive");
+            emit logMessage("🔄 Usando método especial con confirmación");
+        }
+        
         while (m_downloadAttempts < maxAttempts && !m_canceled) {
             m_downloadAttempts++;
-            emit logMessage(QString("Intento de descarga %1/%2...").arg(m_downloadAttempts).arg(maxAttempts));
+            emit logMessage(QString("🔄 Intento de descarga %1/%2...").arg(m_downloadAttempts).arg(maxAttempts));
             
-            // Primero intentar con wget (resumible)
             if (downloadWithWgetResumable(url, outputPath)) {
                 return true;
             }
             
-            emit logMessage("wget falló, intentando con curl...");
+            emit logMessage("❌ wget falló, intentando con curl...");
             
-            // Si wget falla, intentar con curl (resumible)
             if (downloadWithCurlResumable(url, outputPath)) {
                 return true;
             }
             
             if (m_downloadAttempts < maxAttempts && !m_canceled) {
-                int waitTime = 5 * m_downloadAttempts; // Esperar 5, 10, 15 segundos
-                emit logMessage(QString("Esperando %1 segundos antes de reintentar...").arg(waitTime));
+                int waitTime = 10 * m_downloadAttempts;
+                emit logMessage(QString("⏳ Esperando %1 segundos antes de reintentar...").arg(waitTime));
                 QThread::sleep(waitTime);
             }
         }
@@ -371,23 +708,188 @@ private:
     }
     
     bool downloadWithWgetResumable(const QString &url, const QString &outputPath) {
-        QProcess wgetProcess;
+        if (url.contains("localhost") || url.contains("127.0.0.1") || url.startsWith("file://")) {
+            emit logMessage("🌐 Usando modo local - descarga directa");
+            
+            QProcess wgetProcess;
+            QStringList wgetArgs;
+            wgetArgs << "--no-check-certificate";
+            wgetArgs << "--progress=bar:force:noscroll";
+            wgetArgs << "-O" << outputPath;
+            wgetArgs << "--tries=3";
+            wgetArgs << "--timeout=30";
+            wgetArgs << url;
+            
+            emit logMessage("📥 Iniciando descarga directa desde servidor local...");
+            wgetProcess.start("wget", wgetArgs);
+            
+            if (!wgetProcess.waitForStarted()) {
+                emit logMessage("❌ wget no pudo iniciarse para URL local");
+                return false;
+            }
+            
+            QEventLoop loop;
+            QTimer timer;
+            timer.setSingleShot(true);
+            
+            connect(&wgetProcess, &QProcess::readyReadStandardError, this, [this, &wgetProcess]() {
+                QString output = QString::fromUtf8(wgetProcess.readAllStandardError());
+                
+                if (!output.trimmed().isEmpty()) {
+                    QRegularExpression percentRe(R"(\s+(\d+)%\[)");
+                    QRegularExpressionMatch percentMatch = percentRe.match(output);
+                    
+                    if (percentMatch.hasMatch()) {
+                        int percent = percentMatch.captured(1).toInt();
+                        int progress = 5 + (percent * 0.45);
+                        
+                        QRegularExpression sizeRe(R"(\s+(\d+\.?\d*)([KM]?)\s+(\d+\.?\d*)([KM]?)B/s\s+eta)");
+                        QRegularExpressionMatch sizeMatch = sizeRe.match(output);
+                        
+                        QString statusMessage;
+                        if (sizeMatch.hasMatch()) {
+                            QString downloaded = sizeMatch.captured(1) + sizeMatch.captured(2);
+                            QString speed = sizeMatch.captured(3) + sizeMatch.captured(4);
+                            statusMessage = QString("Descargando: %1% (%2 a %3/s)").arg(percent).arg(downloaded).arg(speed);
+                        } else {
+                            statusMessage = QString("Descargando: %1%").arg(percent);
+                        }
+                        
+                        emit progressUpdated(progress, statusMessage);
+                        
+                        static int lastLoggedPercent = 0;
+                        if (percent >= lastLoggedPercent + 10) {
+                            emit logMessage(QString("📊 %1% descargado").arg(percent));
+                            lastLoggedPercent = percent - (percent % 10);
+                        }
+                    }
+                }
+            });
+
+            connect(&wgetProcess, &QProcess::readyReadStandardOutput, this, [this, &wgetProcess]() {
+                QString output = QString::fromUtf8(wgetProcess.readAllStandardOutput());
+                if (!output.trimmed().isEmpty()) {
+                    QRegularExpression infoRe(R"(Length:\s+(\d+)\s+\((\d+)([KM]?)\))");
+                    QRegularExpressionMatch infoMatch = infoRe.match(output);
+                    if (infoMatch.hasMatch()) {
+                        QString totalSize = infoMatch.captured(1);
+                        QString humanSize = infoMatch.captured(2) + infoMatch.captured(3);
+                        emit logMessage(QString("📏 Tamaño del archivo local: %1 (%2 bytes)").arg(humanSize).arg(totalSize));
+                    }
+                }
+            });
+            
+            connect(&wgetProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                    &loop, &QEventLoop::quit);
+            
+            connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+            timer.start(7200000);
+            
+            loop.exec();
+            
+            if (wgetProcess.exitCode() != 0 && !m_canceled) {
+                emit logMessage(QString("❌ wget falló con código: %1").arg(wgetProcess.exitCode()));
+                return false;
+            }
+            
+            if (QFile::exists(outputPath)) {
+                QFileInfo fileInfo(outputPath);
+                qint64 size = fileInfo.size();
+                
+                if (size > 0) {
+                    emit logMessage(QString("✅ Descarga local completada: %1 bytes").arg(size));
+                    return true;
+                } else {
+                    emit logMessage("❌ Archivo local descargado está vacío");
+                    QFile::remove(outputPath);
+                    return false;
+                }
+            } else {
+                emit logMessage("❌ No se pudo descargar el archivo local");
+                return false;
+            }
+        }
         
+        // Código para Google Drive...
+        QRegularExpression idRe("id=([^&]+)");
+        QRegularExpressionMatch match = idRe.match(url);
+        
+        if (!match.hasMatch()) {
+            emit logMessage("❌ No se pudo extraer el ID del archivo");
+            return false;
+        }
+        
+        QString fileId = match.captured(1);
+        emit logMessage("📁 ID del archivo: " + fileId);
+        
+        QString htmlFile = "/tmp/gdrive_" + fileId + ".html";
+        QString cookiesFile = "/tmp/gdrive_cookies_" + fileId + ".txt";
+        
+        QProcess getPageProcess;
+        QStringList getPageArgs;
+        getPageArgs << "--no-check-certificate";
+        getPageArgs << "--save-cookies" << cookiesFile;
+        getPageArgs << "--keep-session-cookies";
+        getPageArgs << "-O" << htmlFile;
+        getPageArgs << QString("https://drive.google.com/uc?export=download&id=%1").arg(fileId);
+        
+        emit logMessage("🔍 Obteniendo formulario de confirmación...");
+        getPageProcess.start("wget", getPageArgs);
+        getPageProcess.waitForFinished(10000);
+        
+        QString uuid;
+        QFile file(htmlFile);
+        
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream in(&file);
+            QString content = in.readAll();
+            file.close();
+            
+            QRegularExpression uuidRe("name=\"uuid\"\\s+value=\"([^\"]+)\"");
+            QRegularExpressionMatch uuidMatch = uuidRe.match(content);
+            
+            if (uuidMatch.hasMatch()) {
+                uuid = uuidMatch.captured(1);
+                emit logMessage("✅ UUID obtenido: " + uuid);
+            } else {
+                uuid = QUuid::createUuid().toString().remove('{').remove('}');
+                emit logMessage("⚠️  Generando UUID: " + uuid);
+            }
+        } else {
+            uuid = QUuid::createUuid().toString().remove('{').remove('}');
+            emit logMessage("⚠️  Usando UUID generado: " + uuid);
+        }
+        
+        QString downloadUrl = QString("https://drive.usercontent.google.com/download?"
+                                    "id=%1&"
+                                    "export=download&"
+                                    "confirm=t&"
+                                    "uuid=%2")
+                                .arg(fileId).arg(uuid);
+        
+        emit logMessage("🔗 URL final: " + downloadUrl);
+        
+        QProcess wgetProcess;
         QStringList wgetArgs;
         wgetArgs << "--no-check-certificate";
-        wgetArgs << "--no-netrc";
-        wgetArgs << "--progress=dot:giga";
-        wgetArgs << "-c"; // --continue: descarga resumible
+        wgetArgs << "--load-cookies" << cookiesFile;
+        wgetArgs << "--progress=bar:force:noscroll";
+        wgetArgs << "-c";
         wgetArgs << "-O" << outputPath;
         wgetArgs << "--tries=3";
         wgetArgs << "--timeout=30";
         wgetArgs << "--waitretry=5";
-        wgetArgs << url;
+        wgetArgs << downloadUrl;
         
+        wgetArgs << "--header=User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36";
+        
+        emit logMessage("📥 Iniciando descarga del archivo...");
         wgetProcess.start("wget", wgetArgs);
         
         if (!wgetProcess.waitForStarted()) {
-            emit logMessage("wget no está disponible o no pudo iniciarse");
+            emit logMessage("❌ wget no pudo iniciarse");
+            QFile::remove(cookiesFile);
+            QFile::remove(htmlFile);
             return false;
         }
         
@@ -395,29 +897,50 @@ private:
         QTimer timer;
         timer.setSingleShot(true);
         
-        connect(&wgetProcess, &QProcess::readyReadStandardOutput, this, [this, &wgetProcess]() {
-            QString output = QString::fromUtf8(wgetProcess.readAllStandardOutput());
+        connect(&wgetProcess, &QProcess::readyReadStandardError, this, [this, &wgetProcess]() {
+            QString output = QString::fromUtf8(wgetProcess.readAllStandardError());
+            
             if (!output.trimmed().isEmpty()) {
-                QRegularExpression re(R"((\d+)%)");
-                QRegularExpressionMatchIterator matches = re.globalMatch(output);
-                while (matches.hasNext()) {
-                    QRegularExpressionMatch match = matches.next();
-                    int percent = match.captured(1).toInt();
+                QRegularExpression percentRe(R"(\s+(\d+)%\[)");
+                QRegularExpressionMatch percentMatch = percentRe.match(output);
+                
+                if (percentMatch.hasMatch()) {
+                    int percent = percentMatch.captured(1).toInt();
                     int progress = 5 + (percent * 0.45);
-                    emit progressUpdated(progress, QString("Descargando: %1%").arg(percent));
                     
-                    // Información adicional
-                    if (output.contains("continuando")) {
-                        emit logMessage("✅ Reanudando descarga desde punto anterior...");
+                    QRegularExpression sizeRe(R"(\s+(\d+\.?\d*)([KM]?)\s+(\d+\.?\d*)([KM]?)B/s\s+eta)");
+                    QRegularExpressionMatch sizeMatch = sizeRe.match(output);
+                    
+                    QString statusMessage;
+                    if (sizeMatch.hasMatch()) {
+                        QString downloaded = sizeMatch.captured(1) + sizeMatch.captured(2);
+                        QString speed = sizeMatch.captured(3) + sizeMatch.captured(4);
+                        statusMessage = QString("Descargando: %1% (%2 a %3/s)").arg(percent).arg(downloaded).arg(speed);
+                    } else {
+                        statusMessage = QString("Descargando: %1%").arg(percent);
+                    }
+                    
+                    emit progressUpdated(progress, statusMessage);
+                    
+                    static int lastLoggedPercent = 0;
+                    if (percent >= lastLoggedPercent + 10) {
+                        emit logMessage(QString("📊 %1% descargado").arg(percent));
+                        lastLoggedPercent = percent - (percent % 10);
                     }
                 }
             }
         });
-        
-        connect(&wgetProcess, &QProcess::readyReadStandardError, this, [this, &wgetProcess]() {
-            QString error = QString::fromUtf8(wgetProcess.readAllStandardError());
-            if (!error.trimmed().isEmpty() && !error.contains("SSL")) {
-                emit logMessage("wget: " + error.trimmed());
+
+        connect(&wgetProcess, &QProcess::readyReadStandardOutput, this, [this, &wgetProcess]() {
+            QString output = QString::fromUtf8(wgetProcess.readAllStandardOutput());
+            if (!output.trimmed().isEmpty()) {
+                QRegularExpression infoRe(R"(Length:\s+(\d+)\s+\((\d+)([KM]?)\))");
+                QRegularExpressionMatch infoMatch = infoRe.match(output);
+                if (infoMatch.hasMatch()) {
+                    QString totalSize = infoMatch.captured(1);
+                    QString humanSize = infoMatch.captured(2) + infoMatch.captured(3);
+                    emit logMessage(QString("📁 Tamaño total del archivo: %1 (%2 bytes)").arg(humanSize).arg(totalSize));
+                }
             }
         });
         
@@ -425,23 +948,57 @@ private:
                 &loop, &QEventLoop::quit);
         
         connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-        timer.start(7200000); // 2 horas máximo
+        timer.start(7200000);
         
         loop.exec();
         
+        QFile::remove(cookiesFile);
+        QFile::remove(htmlFile);
+        
         if (wgetProcess.exitCode() != 0 && !m_canceled) {
-            emit logMessage(QString("wget salió con código: %1").arg(wgetProcess.exitCode()));
-            
-            // Si el archivo existe pero la descarga falló, guardar el progreso
-            if (QFile::exists(outputPath)) {
-                qint64 currentSize = QFileInfo(outputPath).size();
-                emit logMessage(QString("Progreso guardado: %1 bytes descargados").arg(currentSize));
-            }
-            
+            emit logMessage(QString("❌ wget falló con código: %1").arg(wgetProcess.exitCode()));
             return false;
         }
         
-        return !m_canceled;
+        if (QFile::exists(outputPath)) {
+            QFileInfo fileInfo(outputPath);
+            qint64 size = fileInfo.size();
+            
+            if (size < 10000) {
+                QFile checkFile(outputPath);
+                if (checkFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                    QString header = checkFile.read(100);
+                    checkFile.close();
+                    
+                    if (header.contains("<!DOCTYPE") || header.contains("<html")) {
+                        emit logMessage("❌ ERROR: Se descargó HTML en lugar del archivo");
+                        QFile::remove(outputPath);
+                        return false;
+                    }
+                }
+            }
+            
+            emit logMessage(QString("✅ Descarga completada: %1 bytes").arg(size));
+            return true;
+        }
+        
+        return false;
+    }
+    
+    QString formatBytes(qint64 bytes) {
+        const qint64 KB = 1024;
+        const qint64 MB = KB * 1024;
+        const qint64 GB = MB * 1024;
+        
+        if (bytes >= GB) {
+            return QString("%1 GB").arg(QString::number(bytes / (double)GB, 'f', 2));
+        } else if (bytes >= MB) {
+            return QString("%1 MB").arg(QString::number(bytes / (double)MB, 'f', 2));
+        } else if (bytes >= KB) {
+            return QString("%1 KB").arg(QString::number(bytes / (double)KB, 'f', 2));
+        } else {
+            return QString("%1 bytes").arg(bytes);
+        }
     }
     
     bool downloadWithCurlResumable(const QString &url, const QString &outputPath) {
@@ -449,8 +1006,15 @@ private:
         
         QStringList curlArgs;
         curlArgs << "-L";
-        curlArgs << "--progress-bar";
-        curlArgs << "-C"; // --continue-at: descarga resumible
+        
+        if (url.contains("localhost") || url.contains("127.0.0.1")) {
+            curlArgs << "#";
+            emit logMessage("🌐 Usando modo local - progreso simplificado");
+        } else {
+            curlArgs << "--progress-bar";
+        }
+        
+        curlArgs << "-C";
         curlArgs << "-";
         curlArgs << "--output" << outputPath;
         curlArgs << "--location-trusted";
@@ -472,12 +1036,57 @@ private:
         QTimer progressTimer;
         progressTimer.setInterval(1000);
         qint64 lastSize = 0;
+        qint64 totalSize = 0;
+        QDateTime downloadStartTime = QDateTime::currentDateTime();
         
-        connect(&progressTimer, &QTimer::timeout, this, [this, outputPath, &lastSize]() {
+        if (url.contains("localhost") || url.contains("127.0.0.1")) {
+            QProcess headProcess;
+            headProcess.start("curl", QStringList() << "-I" << url);
+            headProcess.waitForFinished();
+            QString output = QString::fromUtf8(headProcess.readAllStandardOutput());
+            
+            QRegularExpression re("Content-Length: (\\d+)");
+            QRegularExpressionMatch match = re.match(output);
+            if (match.hasMatch()) {
+                totalSize = match.captured(1).toLongLong();
+                emit logMessage(QString("📏 Tamaño total del archivo local: %1").arg(formatBytes(totalSize)));
+            }
+        }
+        
+        connect(&progressTimer, &QTimer::timeout, this, [this, outputPath, &lastSize, totalSize, &downloadStartTime]() {
             QFileInfo fileInfo(outputPath);
             qint64 currentSize = fileInfo.size();
+            
             if (currentSize > lastSize) {
-                emit logMessage(QString("Descargado: %1 KB").arg(currentSize / 1024));
+                QDateTime now = QDateTime::currentDateTime();
+                qint64 elapsedSeconds = downloadStartTime.secsTo(now);
+                
+                if (elapsedSeconds > 0) {
+                    double speed = (currentSize - lastSize) / 1024.0;
+                    QString speedStr = QString::number(speed, 'f', 1);
+                    
+                    int percent = 0;
+                    if (totalSize > 0) {
+                        percent = (currentSize * 100) / totalSize;
+                    }
+                    int progress = 3 + (percent * 0.47);
+                    
+                    QString statusMessage;
+                    if (totalSize > 0) {
+                        QString eta = calculateSimpleETA(currentSize, totalSize, downloadStartTime);
+                        statusMessage = QString("Descargando: %1% (%2 KB/s) - %3")
+                                        .arg(percent)
+                                        .arg(speedStr)
+                                        .arg(eta);
+                    } else {
+                        statusMessage = QString("Descargando: %1 a %2 KB/s")
+                                        .arg(formatBytes(currentSize))
+                                        .arg(speedStr);
+                    }
+                    
+                    emit progressUpdated(progress, statusMessage);
+                }
+                
                 lastSize = currentSize;
             }
         });
@@ -498,7 +1107,6 @@ private:
         if (curlProcess.exitCode() != 0 && !m_canceled) {
             emit logMessage(QString("curl salió con código: %1").arg(curlProcess.exitCode()));
             
-            // Si el archivo existe pero la descarga falló, guardar el progreso
             if (QFile::exists(outputPath)) {
                 qint64 currentSize = QFileInfo(outputPath).size();
                 emit logMessage(QString("Progreso guardado: %1 bytes descargados").arg(currentSize));
@@ -509,14 +1117,72 @@ private:
         
         return !m_canceled;
     }
+
+    QString calculateSimpleETA(qint64 currentSize, qint64 totalSize, const QDateTime &startTime) {
+        if (currentSize <= 0 || totalSize <= 0) return "";
+        
+        QDateTime now = QDateTime::currentDateTime();
+        qint64 elapsedSeconds = startTime.secsTo(now);
+        if (elapsedSeconds <= 0) return "";
+        
+        double speed = currentSize / (double)elapsedSeconds;
+        qint64 remainingBytes = totalSize - currentSize;
+        int remainingSeconds = qRound(remainingBytes / speed);
+        
+        if (remainingSeconds < 60) {
+            return QString("%1s").arg(remainingSeconds);
+        } else if (remainingSeconds < 3600) {
+            return QString("%1m").arg(qRound(remainingSeconds / 60.0));
+        } else {
+            return QString("%1h").arg(qRound(remainingSeconds / 3600.0));
+        }
+    }
     
-    // MÉTODO CORREGIDO: Extraer en grupos pequeños manteniendo el .tar completo
     bool extractArchiveIncremental(const QString &archivePath, const QString &outputDir) {
-        emit logMessage("🔄 Extrayendo en grupos pequeños...");
+        emit logMessage("🧹 Preparando directorio destino: " + outputDir);
+        
+        QFileInfo dirInfo(outputDir);
+        if (dirInfo.exists() && !dirInfo.isDir()) {
+            emit logMessage("⚠️  '" + outputDir + "' es un archivo, eliminándolo...");
+            if (!QFile::remove(outputDir)) {
+                emit logMessage("❌ No se pudo eliminar el archivo: " + outputDir);
+                return false;
+            }
+            emit logMessage("✅ Archivo eliminado, creando directorio...");
+        }
+        
+        if (QDir(outputDir).exists()) {
+            emit logMessage("🗑️  Limpiando directorio existente...");
+            
+            QDir dir(outputDir);
+            QStringList items = dir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+            
+            int removedCount = 0;
+            foreach (const QString &item, items) {
+                QString itemPath = outputDir + "/" + item;
+                if (QFileInfo(itemPath).isDir()) {
+                    if (QDir(itemPath).removeRecursively()) {
+                        removedCount++;
+                    }
+                } else {
+                    if (QFile::remove(itemPath)) {
+                        removedCount++;
+                    }
+                }
+            }
+            emit logMessage(QString("✅ Eliminados %1 elementos previos").arg(removedCount));
+        }
+        
+        if (!QDir().mkpath(outputDir)) {
+            emit logMessage("❌ No se pudo crear directorio: " + outputDir);
+            return false;
+        }
+        emit logMessage("✅ Directorio listo: " + outputDir);
+
+        emit logMessage("🔄 Extrayendo en grupos optimizados...");
         
         QDir().mkpath(outputDir);
         
-        // Paso 1: Obtener lista de archivos del .tar
         emit logMessage("Obteniendo lista de archivos del .tar...");
         QStringList fileList = getTarFileList(archivePath);
         
@@ -525,46 +1191,289 @@ private:
             return false;
         }
         
-        emit logMessage(QString("✅ Encontrados %1 archivos en el .tar").arg(fileList.size()));
+        int totalFiles = fileList.size();
+        emit logMessage(QString("✅ Encontrados %1 archivos en el .tar").arg(totalFiles));
         
-        // Paso 2: Extraer en grupos de 50 archivos
-        const int GROUP_SIZE = 50;
-        int totalGroups = (fileList.size() + GROUP_SIZE - 1) / GROUP_SIZE;
+        emit logMessage("🔍 Primeros archivos en el tar:");
+        for (int i = 0; i < qMin(5, fileList.size()); i++) {
+            emit logMessage("   " + fileList[i]);
+        }
+        
+        QString prefix = "";
+        if (!fileList.isEmpty()) {
+            QString firstFile = fileList[0];
+            if (firstFile.startsWith("Atlas_Interactivo-1.0.0-linux-x64/")) {
+                prefix = "Atlas_Interactivo-1.0.0-linux-x64/";
+                emit logMessage("📁 PREFIJO DETECTADO: '" + prefix + "'");
+                emit logMessage("🔧 Se usará: --strip-components=1");
+                
+                bool validPrefix = true;
+                for (int i = 0; i < qMin(10, fileList.size()); i++) {
+                    if (!fileList[i].startsWith(prefix)) {
+                        emit logMessage("⚠️  Archivo sin prefijo esperado: " + fileList[i]);
+                        validPrefix = false;
+                        break;
+                    }
+                }
+                
+                if (!validPrefix) {
+                    emit logMessage("❌ Prefijo inconsistente, usando extracción normal");
+                    prefix = "";
+                }
+            } else {
+                emit logMessage("ℹ️  No se detectó prefijo esperado");
+                emit logMessage("   Primer archivo: " + firstFile);
+            }
+        }
+        
+        int optimalGroupSize = 50000;
+        emit logMessage(QString("📊 Tamaño de grupo: %1 archivos por grupo").arg(optimalGroupSize));
+        
+        int totalGroups = (totalFiles + optimalGroupSize - 1) / optimalGroupSize;
         int currentGroup = 0;
         
         emit progressUpdated(60, "Extrayendo archivos...");
         
-        for (int i = 0; i < fileList.size(); i += GROUP_SIZE) {
+        QDateTime extractionStartTime = QDateTime::currentDateTime();
+        
+        for (int i = 0; i < totalFiles; i += optimalGroupSize) {
             currentGroup++;
             int startIdx = i;
-            int endIdx = qMin(i + GROUP_SIZE, fileList.size());
+            int endIdx = qMin(i + optimalGroupSize, totalFiles);
             
-            emit logMessage(QString("Extrayendo grupo %1/%2 (archivos %3-%4)...")
-                           .arg(currentGroup).arg(totalGroups)
-                           .arg(startIdx + 1).arg(endIdx));
+            QDateTime now = QDateTime::currentDateTime();
+            qint64 elapsedSeconds = extractionStartTime.secsTo(now);
             
-            // Extraer este grupo
-            QStringList group = fileList.mid(startIdx, GROUP_SIZE);
-            if (!extractFileGroup(archivePath, outputDir, group)) {
+            QString etaMessage;
+            if (elapsedSeconds > 0 && i > 0) {
+                double speed = i / (double)elapsedSeconds;
+                int remainingFiles = totalFiles - i;
+                int remainingSeconds = qRound(remainingFiles / speed);
+                
+                if (remainingSeconds < 60) {
+                    etaMessage = QString(" - ETA: %1s").arg(remainingSeconds);
+                } else if (remainingSeconds < 3600) {
+                    etaMessage = QString(" - ETA: %1m").arg(qRound(remainingSeconds / 60.0));
+                } else {
+                    etaMessage = QString(" - ETA: %1h").arg(qRound(remainingSeconds / 3600.0));
+                }
+            }
+            
+            emit logMessage(QString("📦 Grupo %1/%2: archivos %3-%4%5")
+                        .arg(currentGroup).arg(totalGroups)
+                        .arg(startIdx + 1).arg(endIdx)
+                        .arg(etaMessage));
+            
+            QStringList group = fileList.mid(startIdx, optimalGroupSize);
+            if (!extractFileGroupWithPrefix(archivePath, outputDir, group, prefix)) {
                 emit logMessage("❌ Error extrayendo grupo");
                 return false;
             }
             
-            // Actualizar progreso
-            int progress = 60 + (30 * endIdx / fileList.size());
+            int progress = 60 + (40 * endIdx / totalFiles);
             emit progressUpdated(progress, 
-                QString("Extrayendo: %1/%2 archivos")
-                .arg(endIdx).arg(fileList.size()));
+                QString("Extrayendo: %1/%2 archivos").arg(endIdx).arg(totalFiles));
             
-            // Pequeña pausa para evitar saturar el sistema
-            QThread::msleep(50);
+            if (currentGroup % 5 == 0) {
+                QThread::msleep(50);
+            }
         }
         
         emit logMessage("✅ Todos los grupos extraídos correctamente");
+        
+        QDir outputDirObj(outputDir);
+        QStringList extractedItems = outputDirObj.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+        
+        emit logMessage("📁 Archivos extraídos en el directorio destino:");
+        for (int i = 0; i < qMin(10, extractedItems.size()); i++) {
+            emit logMessage("   " + extractedItems[i]);
+        }
+        
+        emit logMessage(QString("📊 Total extraído: %1 archivos/directorios").arg(extractedItems.size()));
+        
+        QString oldDirName = "Atlas_Interactivo-1.0.0-linux-x64";
+        QString oldDirPath = outputDir + "/" + oldDirName;
+        
+        if (QDir(oldDirPath).exists()) {
+            emit logMessage("🔄 Reorganizando: Moviendo archivos desde " + oldDirName + "/");
+            if (!reorganizeExtractedFiles(outputDir, oldDirName)) {
+                emit logMessage("⚠️  Error reorganizando, pero la extracción fue exitosa");
+            }
+        } else {
+            emit logMessage("✅ Los archivos ya están en la ubicación correcta");
+        }
+        
+        return true;
+    }
+
+    bool reorganizeExtractedFiles(const QString &outputDir, const QString &oldDirName) {
+        QString oldDirPath = outputDir + "/" + oldDirName;
+        QDir oldDir(oldDirPath);
+        
+        if (!oldDir.exists()) {
+            emit logMessage("ℹ️  No se encontró directorio a reorganizar: " + oldDirName);
+            return true;
+        }
+        
+        emit logMessage("🔄 Reorganizando: Moviendo contenido de " + oldDirName + " a raíz...");
+        
+        QStringList items = oldDir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+        
+        if (items.isEmpty()) {
+            emit logMessage("⚠️  Directorio vacío: " + oldDirName);
+            oldDir.rmdir(oldDirPath);
+            return true;
+        }
+        
+        emit logMessage(QString("📦 Moviendo %1 elementos...").arg(items.size()));
+        
+        int movedCount = 0;
+        int failedCount = 0;
+        
+        foreach (const QString &item, items) {
+            QString sourcePath = oldDirPath + "/" + item;
+            QString destPath = outputDir + "/" + item;
+            
+            emit logMessage("   Mover: " + item);
+            
+            if (QFile::exists(destPath)) {
+                emit logMessage("   ⚠️  Ya existe: " + item + " - Sobrescribiendo");
+                
+                if (QFileInfo(destPath).isDir()) {
+                    QDir(destPath).removeRecursively();
+                } else {
+                    QFile::remove(destPath);
+                }
+            }
+            
+            if (QFile::rename(sourcePath, destPath)) {
+                movedCount++;
+                emit logMessage("   ✅ Movido: " + item);
+            } else {
+                emit logMessage("   🔄 Rename falló, intentando copiar: " + item);
+                
+                QProcess cpProcess;
+                if (QFileInfo(sourcePath).isDir()) {
+                    cpProcess.start("cp", QStringList() << "-r" << sourcePath << destPath);
+                } else {
+                    cpProcess.start("cp", QStringList() << sourcePath << destPath);
+                }
+                
+                cpProcess.waitForFinished(30000);
+                
+                if (cpProcess.exitCode() == 0 && QFile::exists(destPath)) {
+                    movedCount++;
+                    if (QFileInfo(sourcePath).isDir()) {
+                        QDir(sourcePath).removeRecursively();
+                    } else {
+                        QFile::remove(sourcePath);
+                    }
+                    emit logMessage("   ✅ Copiado: " + item);
+                } else {
+                    failedCount++;
+                    emit logMessage("   ❌ Falló: " + item);
+                }
+            }
+        }
+        
+        emit logMessage(QString("📊 Resultado: %1 movidos, %2 fallos").arg(movedCount).arg(failedCount));
+        
+        if (oldDir.exists()) {
+            QStringList remaining = oldDir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+            if (remaining.isEmpty()) {
+                if (oldDir.rmdir(oldDirPath)) {
+                    emit logMessage("🗑️  Directorio vacío eliminado: " + oldDirName);
+                }
+            } else {
+                emit logMessage("⚠️  Directorio no vacío, no se puede eliminar: " + oldDirName);
+                emit logMessage("   Archivos restantes: " + remaining.join(", "));
+            }
+        }
+        
+        return failedCount == 0;
+    }
+
+    bool extractFileGroupWithPrefix(const QString &archivePath, const QString &outputDir, 
+                                 const QStringList &files, const QString &prefix) {
+        if (files.isEmpty()) {
+            return true;
+        }
+        
+        QString tempListFile = QDir::tempPath() + "/tar_list_" + 
+                            QUuid::createUuid().toString().mid(1, 8) + ".txt";
+        
+        QFile listFile(tempListFile);
+        if (!listFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            emit logMessage("❌ No se pudo crear archivo de lista temporal");
+            return false;
+        }
+        
+        QTextStream out(&listFile);
+        foreach (const QString &file, files) {
+            out << file << "\n";
+        }
+        listFile.close();
+        
+        emit logMessage(QString("📄 Extrayendo %1 archivos...").arg(files.size()));
+        
+        QProcess tarProcess;
+        QStringList tarArgs;
+        tarArgs << "-xf" << archivePath;
+        tarArgs << "-C" << outputDir;
+        
+        if (!prefix.isEmpty() && prefix.endsWith("/")) {
+            emit logMessage("🔧 Aplicando: --strip-components=1 (prefijo: " + prefix + ")");
+            tarArgs << "--strip-components=1";
+        } else {
+            emit logMessage("🔧 Sin --strip-components (no hay prefijo)");
+        }
+        
+        tarArgs << "-T" << tempListFile;
+        
+        emit logMessage("💻 Comando: tar " + tarArgs.join(" "));
+        
+        tarProcess.start("tar", tarArgs);
+        
+        if (!tarProcess.waitForFinished(300000)) {
+            emit logMessage("❌ Timeout extrayendo grupo");
+            QFile::remove(tempListFile);
+            return false;
+        }
+        
+        QFile::remove(tempListFile);
+        
+        if (tarProcess.exitCode() != 0) {
+            QString error = QString::fromUtf8(tarProcess.readAllStandardError());
+            
+            emit logMessage("❌ Error en tar:");
+            QStringList errorLines = error.split('\n', Qt::SkipEmptyParts);
+            for (int i = 0; i < qMin(5, errorLines.size()); i++) {
+                emit logMessage("   " + errorLines[i]);
+            }
+            
+            bool criticalError = false;
+            foreach (const QString &line, errorLines) {
+                if (line.contains("Not found in archive") || 
+                    line.contains("Exiting with failure status") ||
+                    line.contains("Cannot open")) {
+                    criticalError = true;
+                    break;
+                }
+            }
+            
+            if (criticalError) {
+                emit logMessage("❌ ERROR CRÍTICO en extracción");
+                return false;
+            } else if (!error.trimmed().isEmpty()) {
+                emit logMessage("⚠️  Advertencias en tar (continuando...)");
+            }
+        } else {
+            emit logMessage("✅ Grupo extraído exitosamente");
+        }
+        
         return true;
     }
     
-    // Obtener lista de archivos del .tar
     QStringList getTarFileList(const QString &archivePath) {
         QProcess tarProcess;
         tarProcess.start("tar", QStringList() << "-tf" << archivePath);
@@ -583,16 +1492,23 @@ private:
         QString output = QString::fromUtf8(tarProcess.readAllStandardOutput());
         QStringList fileList = output.split('\n', Qt::SkipEmptyParts);
         
-        // Filtrar entradas vacías
         fileList = fileList.filter(QRegularExpression(".+"));
         
         return fileList;
     }
     
-    // Extraer un grupo específico de archivos
     bool extractFileGroup(const QString &archivePath, const QString &outputDir, const QStringList &files) {
         if (files.isEmpty()) {
             return true;
+        }
+        
+        emit logMessage(QString("📂 Extrayendo %1 archivos...").arg(files.size()));
+        
+        foreach (const QString &filePath, files) {
+            QString fullPath = outputDir + "/" + filePath;
+            QFileInfo fileInfo(fullPath);
+            
+            QDir().mkpath(fileInfo.absolutePath());
         }
         
         QProcess tarProcess;
@@ -600,24 +1516,67 @@ private:
         tarArgs << "-xf" << archivePath;
         tarArgs << "-C" << outputDir;
         
-        // Añadir archivos específicos
+        QStringList filteredFiles;
+        
         foreach (const QString &file, files) {
-            tarArgs << file;
+            if (file.startsWith("Atlas_Interactivo-1.0.0-linux-x64/")) {
+                filteredFiles << file;
+            } else if (file.contains("/")) {
+                QString dirPath = file.left(file.lastIndexOf('/'));
+                if (!filteredFiles.contains(dirPath)) {
+                    filteredFiles << dirPath;
+                }
+            } else {
+                filteredFiles << file;
+            }
         }
+        
+        if (filteredFiles.isEmpty()) {
+            emit logMessage("ℹ️  Extrayendo todo el contenido del archivo...");
+            tarArgs << "--strip-components=0";
+        } else {
+            emit logMessage(QString("📁 Extrayendo %1 elementos...").arg(filteredFiles.size()));
+            foreach (const QString &file, filteredFiles) {
+                tarArgs << file;
+            }
+        }
+        
+        emit logMessage("🔧 Comando tar: tar " + tarArgs.join(" "));
         
         tarProcess.start("tar", tarArgs);
         
-        if (!tarProcess.waitForFinished(300000)) { // 5 minutos máximo
+        if (!tarProcess.waitForFinished(300000)) {
             emit logMessage("❌ Timeout extrayendo grupo");
             return false;
         }
         
         if (tarProcess.exitCode() != 0) {
             QString error = QString::fromUtf8(tarProcess.readAllStandardError());
-            emit logMessage(QString("❌ Error extrayendo grupo: %1").arg(error));
-            return false;
+            emit logMessage("❌ Error extrayendo grupo: " + error);
+            
+            emit logMessage("🔄 Intentando método alternativo de extracción...");
+            
+            QProcess tarProcess2;
+            tarProcess2.start("tar", QStringList() 
+                << "-xf" << archivePath
+                << "-C" << outputDir
+                << "--strip-components=0");
+            
+            if (!tarProcess2.waitForFinished(300000)) {
+                emit logMessage("❌ Falló método alternativo también");
+                return false;
+            }
+            
+            if (tarProcess2.exitCode() != 0) {
+                QString error2 = QString::fromUtf8(tarProcess2.readAllStandardError());
+                emit logMessage("❌ Error método alternativo: " + error2);
+                return false;
+            }
+            
+            emit logMessage("✅ Extracción exitosa con método alternativo");
         }
         
+        emit logMessage("✅ Grupo extraído correctamente");
         return true;
     }
     
@@ -663,9 +1622,13 @@ InstallerWindow::InstallerWindow(QWidget *parent)
       m_skipDesktopShortcuts(false),
       dpiScale(1.0),
       m_hasSufficientSpace(true),
-      diskSpaceTimer(nullptr)
-
+      diskSpaceTimer(nullptr),
+      currentWorker(nullptr),
+      currentThread(nullptr),
+      m_isInstalling(false)
 {
+    qDebug() << "DEBUG: Constructor InstallerWindow - INICIO";
+    
     // Calcular escala DPI basada en la pantalla
     QScreen *screen = QGuiApplication::primaryScreen();
     dpiScale = screen->logicalDotsPerInch() / 96.0;
@@ -675,7 +1638,9 @@ InstallerWindow::InstallerWindow(QWidget *parent)
     setWindowTitle("Atlas Interactivo - Instalador");
     setupUI();
     
-    // Configurar directorio predeterminado (directorio del ejecutable o directorio actual)
+    qDebug() << "DEBUG: Después de setupUI()";
+    
+    // Configurar directorio predeterminado
     QString appPath = QCoreApplication::applicationDirPath();
     if (!appPath.isEmpty() && appPath != QDir::currentPath()) {
         installDir = appPath + "/Atlas_Interactivo";
@@ -689,16 +1654,15 @@ InstallerWindow::InstallerWindow(QWidget *parent)
     
     // Inicializar timer para actualizar espacio en disco
     diskSpaceTimer = new QTimer(this);
-    diskSpaceTimer->setInterval(2000); // Actualizar cada 2 segundos
+    diskSpaceTimer->setInterval(2000);
     connect(diskSpaceTimer, &QTimer::timeout, this, &InstallerWindow::updateDiskSpace);
     diskSpaceTimer->start();
     
     // Verificar espacio en disco inicial
     updateDiskSpace();
-
+    
+    qDebug() << "DEBUG: Constructor InstallerWindow - FIN";
 }
-
-
 
 QString InstallerWindow::formatBytes(qint64 bytes) {
     const qint64 KB = 1024;
@@ -721,7 +1685,6 @@ qint64 InstallerWindow::getAvailableDiskSpace(const QString &path)
     struct statvfs stat;
     QString checkPath = path;
     
-    // Si el directorio no existe, usar el directorio padre
     while (!QDir(checkPath).exists() && checkPath != "/") {
         checkPath = QFileInfo(checkPath).dir().absolutePath();
     }
@@ -734,7 +1697,7 @@ qint64 InstallerWindow::getAvailableDiskSpace(const QString &path)
         return (qint64)stat.f_bsize * stat.f_bavail;
     }
     
-    return -1; // Error
+    return -1;
 }
 
 qint64 InstallerWindow::getAvailableDiskSpacePrecise(const QString &path)
@@ -742,7 +1705,6 @@ qint64 InstallerWindow::getAvailableDiskSpacePrecise(const QString &path)
     struct statvfs stat;
     QString checkPath = path;
     
-    // Si el directorio no existe, usar el directorio padre
     while (!QDir(checkPath).exists() && checkPath != "/") {
         checkPath = QFileInfo(checkPath).dir().absolutePath();
     }
@@ -752,18 +1714,17 @@ qint64 InstallerWindow::getAvailableDiskSpacePrecise(const QString &path)
     }
     
     if (statvfs(checkPath.toUtf8().constData(), &stat) == 0) {
-        // Cálculo más preciso usando f_frsize (tamaño de fragmento) en lugar de f_bsize
         return (qint64)stat.f_frsize * stat.f_bavail;
     }
     
-    return -1; // Error
+    return -1;
 }
 
 bool InstallerWindow::hasSufficientDiskSpace(qint64 requiredGB)
 {
     qint64 availableBytes = getAvailableDiskSpacePrecise(installDir);
     if (availableBytes < 0) {
-        return true; // Si no podemos verificar, asumir que hay espacio
+        return true;
     }
     
     qint64 requiredBytes = requiredGB * 1024 * 1024 * 1024;
@@ -772,17 +1733,15 @@ bool InstallerWindow::hasSufficientDiskSpace(qint64 requiredGB)
 
 QFont InstallerWindow::getScaledFont(int baseSize) {
     int scaledSize = qRound(baseSize * dpiScale);
-    return QFont("Segoe UI", qMax(scaledSize, 8)); // Mínimo tamaño 8
+    return QFont("Segoe UI", qMax(scaledSize, 8));
 }
 
 void InstallerWindow::setupUI()
 {
-    // Configurar tamaño óptimo SIN ScrollArea - VENTANA COMPACTA
     QRect screenGeometry = QGuiApplication::primaryScreen()->availableGeometry();
     
-    // Tamaños más compactos para evitar scroll
-    int baseWidth = 1200;  // Ancho óptimo
-    int baseHeight = 1200; // Altura ajustada
+    int baseWidth = 1200;
+    int baseHeight = 1200;
 
     int windowWidth = qMin(qRound(baseWidth * dpiScale), int(screenGeometry.width() * 0.9));
     int windowHeight = qMin(qRound(baseHeight * dpiScale), int(screenGeometry.height() * 0.9));
@@ -790,10 +1749,9 @@ void InstallerWindow::setupUI()
     setMinimumSize(qRound(700 * dpiScale), qRound(600 * dpiScale));
     resize(windowWidth, windowHeight);
     
-    // ========== WIDGET CENTRAL SIN SCROLLAREA ==========
     centralWidget = new QWidget(this);
     QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
-    mainLayout->setSpacing(qRound(10 * dpiScale)); // Espaciado reducido
+    mainLayout->setSpacing(qRound(10 * dpiScale));
     mainLayout->setContentsMargins(
         qRound(15 * dpiScale),
         qRound(15 * dpiScale),
@@ -801,16 +1759,14 @@ void InstallerWindow::setupUI()
         qRound(15 * dpiScale)
     );
     
-    // ========== ENCABEZADO ==========
+    // ENCABEZADO
     QHBoxLayout *headerLayout = new QHBoxLayout();
     
-    // Icono
     QLabel *iconLabel = new QLabel("🌍", this);
     iconLabel->setStyleSheet(QString("font-size: %1px; padding-right: %2px;")
         .arg(qRound(40 * dpiScale))
         .arg(qRound(10 * dpiScale)));
     
-    // Título y subtítulo
     QVBoxLayout *titleLayout = new QVBoxLayout();
     titleLabel = new QLabel("ATLAS INTERACTIVO", this);
     titleLabel->setFont(getScaledFont(20));
@@ -827,7 +1783,6 @@ void InstallerWindow::setupUI()
     headerLayout->addLayout(titleLayout);
     headerLayout->addStretch();
     
-    // Versión
     QLabel *versionLabel = new QLabel("v1.0.0", this);
     versionLabel->setFont(getScaledFont(9));
     versionLabel->setStyleSheet("color: #95a5a6;");
@@ -836,7 +1791,7 @@ void InstallerWindow::setupUI()
     mainLayout->addLayout(headerLayout);
     mainLayout->addSpacing(qRound(10 * dpiScale));
     
-    // ========== CONFIGURACIÓN ==========
+    // CONFIGURACIÓN
     QGroupBox *configGroup = new QGroupBox("CONFIGURACIÓN DE INSTALACIÓN", this);
     configGroup->setFont(getScaledFont(10));
     
@@ -849,7 +1804,6 @@ void InstallerWindow::setupUI()
         qRound(12 * dpiScale)
     );
     
-    // Ruta de instalación
     QHBoxLayout *dirLayout = new QHBoxLayout();
     QLabel *dirLabel = new QLabel("Ubicación:", this);
     dirLabel->setFont(getScaledFont(10));
@@ -875,7 +1829,6 @@ void InstallerWindow::setupUI()
     dirLayout->addWidget(browseButton);
     configLayout->addLayout(dirLayout);
     
-    // Información de espacio en disco
     QHBoxLayout *spaceLayout = new QHBoxLayout();
     diskSpaceLabel = new QLabel("", this);
     diskSpaceLabel->setFont(getScaledFont(9));
@@ -890,7 +1843,6 @@ void InstallerWindow::setupUI()
     spaceLayout->addWidget(spaceWarningLabel);
     configLayout->addLayout(spaceLayout);
     
-    // Opciones de acceso directo
     QHBoxLayout *shortcutLayout = new QHBoxLayout();
     desktopShortcutCheck = new QCheckBox("Acceso directo en escritorio", this);
     desktopShortcutCheck->setFont(getScaledFont(9));
@@ -906,7 +1858,6 @@ void InstallerWindow::setupUI()
     shortcutLayout->addStretch();
     configLayout->addLayout(shortcutLayout);
     
-    // Panel de información COMPACTADO (ACTUALIZADO con método optimizado)
     QFrame *infoFrame = new QFrame(this);
     infoFrame->setMinimumHeight(qRound(100 * dpiScale));
     infoFrame->setStyleSheet(R"(
@@ -933,7 +1884,6 @@ void InstallerWindow::setupUI()
         this
     );
 
-
     infoContent->setFont(getScaledFont(8));
     infoContent->setStyleSheet("color: #34495e; line-height: 130%;");
     infoContent->setWordWrap(true);
@@ -945,7 +1895,7 @@ void InstallerWindow::setupUI()
     mainLayout->addWidget(configGroup);
     mainLayout->addSpacing(qRound(10 * dpiScale));
     
-    // ========== PROGRESO ==========
+    // PROGRESO
     QGroupBox *progressGroup = new QGroupBox("PROGRESO DE INSTALACIÓN", this);
     progressGroup->setFont(getScaledFont(10));
     
@@ -958,7 +1908,6 @@ void InstallerWindow::setupUI()
         qRound(12 * dpiScale)
     );
     
-    // Barra de progreso
     QHBoxLayout *progressHeader = new QHBoxLayout();
     QLabel *progressTitle = new QLabel("Progreso:", this);
     progressTitle->setFont(getScaledFont(10));
@@ -979,7 +1928,6 @@ void InstallerWindow::setupUI()
     progressBar->setMinimumHeight(qRound(26 * dpiScale));
     progressLayout->addWidget(progressBar);
     
-    // Área de log COMPACTADA
     QFrame *logFrame = new QFrame(this);
     logFrame->setMinimumHeight(qRound(160 * dpiScale));
     logFrame->setStyleSheet(R"(
@@ -1029,10 +1977,9 @@ void InstallerWindow::setupUI()
     progressLayout->addWidget(logFrame);
     mainLayout->addWidget(progressGroup);
     
-    // Espacio flexible mínimo
     mainLayout->addSpacing(qRound(5 * dpiScale));
     
-    // ========== BOTONES ==========
+    // BOTONES
     QHBoxLayout *buttonLayout = new QHBoxLayout();
     
     aboutButton = new QPushButton("Acerca de", this);
@@ -1061,7 +2008,7 @@ void InstallerWindow::setupUI()
             "<p>Compilado con Qt " QT_VERSION_STR "</p>"
             "<p><b>Características:</b></p>"
             "<p>• Descarga resumible con 3 reintentos</p>"
-            "<p>• Extracción por grupos de 50 archivos</p>"
+            "<p>• Extracción por grupos de 50k archivos</p>"
             "<p>• Espacio temporal máximo: 25 GB</p>");
     });
     
@@ -1082,8 +2029,10 @@ void InstallerWindow::setupUI()
             background-color: #c82333;
         }
     )");
-    connect(exitButton, &QPushButton::clicked, this, &QWidget::close);
-    
+    connect(exitButton, &QPushButton::clicked, this, [this]() {
+        close();
+    });
+
     installButton = new QPushButton("INICIAR INSTALACIÓN", this);
     installButton->setFont(getScaledFont(10));
     installButton->setMinimumWidth(qRound(200 * dpiScale));
@@ -1118,7 +2067,7 @@ void InstallerWindow::setupUI()
     mainLayout->addLayout(buttonLayout);
     mainLayout->addSpacing(qRound(5 * dpiScale));
     
-    // ========== FOOTER ========== (ACTUALIZADO)
+    // FOOTER
     QFrame *footerFrame = new QFrame(this);
     footerFrame->setMinimumHeight(qRound(28 * dpiScale));
     footerFrame->setStyleSheet(R"(
@@ -1139,10 +2088,8 @@ void InstallerWindow::setupUI()
     footerLayout->addWidget(footerLabel);
     mainLayout->addWidget(footerFrame);
     
-    // Establecer widget central (IMPORTANTE: sin ScrollArea)
     setCentralWidget(centralWidget);
     
-    // Centrar ventana
     int x = (screenGeometry.width() - width()) / 2;
     int y = (screenGeometry.height() - height()) / 2;
     move(x, y);
@@ -1150,7 +2097,7 @@ void InstallerWindow::setupUI()
 
 void InstallerWindow::updateDiskSpace()
 {
-    const qint64 REQUIRED_SPACE_GB = 25; // 25 GB (aumentado de 20 GB)
+    const qint64 REQUIRED_SPACE_GB = 25;
     
     qint64 availableBytes = getAvailableDiskSpacePrecise(installDir);
     if (availableBytes < 0) {
@@ -1166,7 +2113,6 @@ void InstallerWindow::updateDiskSpace()
     qint64 requiredBytes = REQUIRED_SPACE_GB * 1024LL * 1024LL * 1024LL;
     
     if (availableBytes >= requiredBytes) {
-        // Suficiente espacio
         diskSpaceLabel->setText(QString("Espacio disponible: %1 GB").arg(QString::number(availableGB, 'f', 2)));
         diskSpaceLabel->setStyleSheet("color: #27ae60; font-weight: bold;");
         spaceWarningLabel->setText("✅ Espacio suficiente");
@@ -1181,7 +2127,6 @@ void InstallerWindow::updateDiskSpace()
             loggedOnce = true;
         }
     } else {
-        // Espacio insuficiente
         diskSpaceLabel->setText(QString("Espacio disponible: %1 GB").arg(QString::number(availableGB, 'f', 2)));
         diskSpaceLabel->setStyleSheet("color: #e74c3c; font-weight: bold;");
         spaceWarningLabel->setText(QString("❌ Requiere %1 GB").arg(REQUIRED_SPACE_GB));
@@ -1223,6 +2168,15 @@ void InstallerWindow::startInstallation()
 {
     installDir = directoryEdit->text();
     
+    if (!installDir.endsWith("/Atlas_Interactivo")) {
+        QString newPath = QDir::cleanPath(installDir + "/Atlas_Interactivo");
+        logText->append("[INFO] Ajustando ruta de instalación a: " + newPath);
+        installDir = newPath;
+        directoryEdit->setText(installDir);
+        
+        updateDiskSpace();
+    }
+
     if (!checkDiskSpace()) {
         QMessageBox::critical(this, "Espacio insuficiente", 
             QString("No hay suficiente espacio en disco.\n\n"
@@ -1243,20 +2197,19 @@ void InstallerWindow::startInstallation()
         "<div align='center'>"
         "<h3>Método optimizado activado</h3>"
         "<p><b>✅ Descarga resumible con 3 reintentos</b></p>"
-        "<p><b>✅ Extracción por grupos de 50 archivos</b></p>"
+        "<p><b>✅ Extracción por grupos de 50k archivos</b></p>"
         "<p><b>✅ Espacio temporal máximo: <font color='green'>25 GB</font></b></p>"
         "<br>"
         "<p>¿Desea continuar con la instalación?</p>"
         "</div>"
     );
         
-    // AÑADE ESTAS LÍNEAS PARA HACERLO MÁS ANCHO:
     msgBox.setStyleSheet(
         "QMessageBox { "
-        "   min-width: 600px; "  // <-- ANCHO MÁS GRANDE
+        "   min-width: 600px; "
         "} "
         "QLabel { "
-        "   min-width: 550px; "  // <-- ANCHO MÁS GRANDE PARA EL TEXTO
+        "   min-width: 550px; "
         "}"
     );
     
@@ -1291,30 +2244,50 @@ void InstallerWindow::startInstallation()
     logText->clear();
     logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Iniciando instalación...");
     logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Descarga resumible activada");
-    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Extracción por grupos de 50 archivos");
+    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Extracción por grupos de 50k archivos");
     logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Espacio temporal máximo: 25 GB");
     
-    QString driveId = "1vzAxSaKRXIPSNf937v6xjuBhRyrCiVRF";
+    QString driveId = "1mWKA6AKcPJAHiTfVkwuaQBfMp7LU8h-i";
     
-    QThread *thread = new QThread;
-    InstallWorker *worker = new InstallWorker(installDir, driveId);
+    currentThread = new QThread;
+    currentWorker = new InstallWorker(installDir, driveId);
     
-    worker->moveToThread(thread);
+    currentWorker->moveToThread(currentThread);
+    m_isInstalling = true;  // Cambiado a m_isInstalling
     
-    connect(thread, &QThread::started, worker, &InstallWorker::doWork);
-    connect(worker, &InstallWorker::progressUpdated, this, &InstallerWindow::updateProgress);
-    connect(worker, &InstallWorker::workFinished, this, &InstallerWindow::installationFinished);
-    connect(worker, &InstallWorker::logMessage, this, [this](const QString &msg) {
-        QMetaObject::invokeMethod(logText, "append", 
-            Qt::QueuedConnection,
-            Q_ARG(QString, "[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] " + msg));
-    });
+    // CONEXIONES MEJORADAS - usar lambdas con captura por copia
+    connect(currentWorker, &InstallWorker::progressUpdated, this, 
+        [this](int value, const QString &message) {
+            QMetaObject::invokeMethod(this, "updateProgress", 
+                Qt::QueuedConnection,
+                Q_ARG(int, value),
+                Q_ARG(QString, message));
+        });
     
-    connect(worker, &InstallWorker::workFinished, thread, &QThread::quit);
-    connect(worker, &InstallWorker::workFinished, worker, &QObject::deleteLater);
-    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    connect(currentWorker, &InstallWorker::workFinished, this,
+        [this](bool success, const QString &message) {
+            QMetaObject::invokeMethod(this, "installationFinished",
+                Qt::QueuedConnection,
+                Q_ARG(bool, success),
+                Q_ARG(QString, message));
+        });
     
-    thread->start();
+    connect(currentWorker, &InstallWorker::logMessage, this,
+        [this](const QString &msg) {
+            QMetaObject::invokeMethod(logText, "append",
+                Qt::QueuedConnection,
+                Q_ARG(QString, "[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] " + msg));
+        });
+    
+    // CONEXIÓN PARA LIMPIEZA - muy importante
+    connect(currentThread, &QThread::finished, currentWorker, &QObject::deleteLater);
+    connect(currentThread, &QThread::finished, currentThread, &QObject::deleteLater);
+    
+    // ¡ESTA ES LA PARTE MÁS IMPORTANTE! Conectar started del thread para iniciar el trabajo
+    connect(currentThread, &QThread::started, currentWorker, &InstallWorker::doWork);
+    
+    // Iniciar thread
+    currentThread->start();
 }
 
 void InstallerWindow::updateProgress(int value, const QString &message)
@@ -1325,11 +2298,14 @@ void InstallerWindow::updateProgress(int value, const QString &message)
 
 void InstallerWindow::installationFinished(bool success, const QString &message)
 {
+    m_isInstalling = false;  // Cambiado a m_isInstalling
+    currentWorker = nullptr;
+    currentThread = nullptr;
+
     installButton->setEnabled(true);
     browseButton->setEnabled(true);
     installButton->setText("INICIAR INSTALACIÓN");
     
-    // Actualizar espacio en disco después de la instalación
     updateDiskSpace();
     
     if (success) {
@@ -1344,7 +2320,6 @@ void InstallerWindow::installationFinished(bool success, const QString &message)
             createDesktopEntry();
         }
         
-        // MODIFICADO: Quitar el icono azul
         QMessageBox msgBox(this);
         msgBox.setWindowTitle("Instalación completada");
         msgBox.setTextFormat(Qt::RichText);
@@ -1359,7 +2334,6 @@ void InstallerWindow::installationFinished(bool success, const QString &message)
             "</div>"
         );
         
-        // AÑADIR ESTILO para quitar icono y centrar todo
         msgBox.setStyleSheet(
             "QMessageBox { "
             "   min-width: 650px; "
@@ -1375,14 +2349,12 @@ void InstallerWindow::installationFinished(bool success, const QString &message)
             "}"
         );
         
-        // IMPORTANTE: Quitar el icono estableciendo icon vacío
         msgBox.setIcon(QMessageBox::NoIcon);
         
         msgBox.setStandardButtons(QMessageBox::Ok);
         msgBox.exec();
         
     } else {
-        // También quitar el icono en el mensaje de error
         QMessageBox msgBox(this);
         msgBox.setWindowTitle("Error de instalación");
         msgBox.setTextFormat(Qt::RichText);
@@ -1399,7 +2371,6 @@ void InstallerWindow::installationFinished(bool success, const QString &message)
             "</div>"
         );
         
-        // AÑADIR ESTILO para quitar icono y centrar
         msgBox.setStyleSheet(
             "QMessageBox { "
             "   min-width: 550px; "
@@ -1415,7 +2386,6 @@ void InstallerWindow::installationFinished(bool success, const QString &message)
             "}"
         );
         
-        // Quitar el icono
         msgBox.setIcon(QMessageBox::NoIcon);
         
         msgBox.setStandardButtons(QMessageBox::Ok);
@@ -1425,9 +2395,154 @@ void InstallerWindow::installationFinished(bool success, const QString &message)
     }
 }
 
+void InstallerWindow::cancelCurrentInstallation()
+{
+    static bool isCancelling = false;  // Prevenir llamadas recursivas
+    
+    if (isCancelling) {
+        qDebug() << "DEBUG: cancelCurrentInstallation ya en progreso, ignorando llamada duplicada";
+        return;
+    }
+    
+    isCancelling = true;
+    
+    qDebug() << "DEBUG: Entrando a cancelCurrentInstallation()";
+    qDebug() << "DEBUG: m_isInstalling =" << m_isInstalling;
+    
+    // VERIFICACIÓN EXTRA DE SEGURIDAD
+    // Solo podemos estar cancelando si el usuario realmente inició la instalación
+    bool userInitiated = false;
+    
+    // Verificar si el usuario hizo clic en "INICIAR INSTALACIÓN"
+    if (installButton && installButton->text() == "Instalando..." && !installButton->isEnabled()) {
+        userInitiated = true;
+        qDebug() << "DEBUG: Instalación iniciada por usuario detectada";
+    }
+    
+    if (!userInitiated && !m_isInstalling) {
+        qDebug() << "DEBUG: ⚠️ INSTALACIÓN NO INICIADA - Cancelación ignorada";
+        isCancelling = false;
+        return;
+    }
+    
+    // Marcar que ya no estamos instalando
+    m_isInstalling = false;
+    
+    // Mostrar mensaje en log
+    if (logText) {
+        logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ⚠️ Cancelando instalación...");
+    }
+    
+    // Cancelar el worker si existe
+    if (currentWorker) {
+        qDebug() << "DEBUG: Cancelando worker...";
+        
+        // Llamar al método de limpieza del worker
+        QMetaObject::invokeMethod(currentWorker, "cleanupProcesses", 
+            Qt::BlockingQueuedConnection);
+        
+        // Pequeña pausa
+        QThread::msleep(100);
+        QApplication::processEvents();
+    }
+    
+    // Detener el thread de manera segura
+    if (currentThread && currentThread->isRunning()) {
+        qDebug() << "DEBUG: Deteniendo thread...";
+        
+        currentThread->requestInterruption();
+        currentThread->quit();
+        
+        // Esperar que termine
+        if (!currentThread->wait(1000)) {
+            qDebug() << "DEBUG: Forzando terminación del thread...";
+            currentThread->terminate();
+            currentThread->wait(500);
+        }
+        
+        qDebug() << "DEBUG: Thread detenido";
+    }
+    
+    // Limpiar archivos temporales
+    QString tempDir = QDir::tempPath();
+    if (!tempDir.isEmpty() && QDir(tempDir).exists()) {
+        QDir temp(tempDir);
+        
+        QStringList patterns;
+        patterns << "atlas_*.tar" << "gdrive_*" 
+                 << "tar_list_*.txt" << "*.part" 
+                 << "cookies.txt" << "gdrive_response.html" 
+                 << "gdrive_cookies_*.txt";
+        
+        foreach (const QString &pattern, patterns) {
+            QStringList tempFiles = temp.entryList(QStringList() << pattern, QDir::Files);
+            foreach (const QString &file, tempFiles) {
+                QString filePath = tempDir + "/" + file;
+                if (!filePath.isEmpty() && QFile::exists(filePath)) {
+                    for (int attempt = 0; attempt < 3; attempt++) {
+                        if (QFile::remove(filePath)) {
+                            if (logText) {
+                                logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] 🗑️ Archivo temporal eliminado: " + file);
+                            }
+                            break;
+                        }
+                        QThread::msleep(100);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Limpiar objetos de manera segura (EVITAR doble eliminación)
+    qDebug() << "DEBUG: Limpiando objetos...";
+    
+    if (currentWorker) {
+        // NO usar disconnect() - puede causar problemas
+        // NO usar deleteLater() aquí - ya se maneja en las conexiones del thread
+        
+        // Solo establecer a nullptr
+        currentWorker = nullptr;
+    }
+    
+    if (currentThread) {
+        // NO usar disconnect() o deleteLater() aquí
+        
+        // Solo establecer a nullptr
+        currentThread = nullptr;
+    }
+    
+    // Actualizar UI
+    if (installButton) {
+        installButton->setEnabled(true);
+        installButton->setText("INICIAR INSTALACIÓN");
+    }
+    
+    if (browseButton) {
+        browseButton->setEnabled(true);
+    }
+    
+    if (progressBar) {
+        progressBar->setValue(0);
+    }
+    
+    if (statusLabel) {
+        statusLabel->setText("Instalación cancelada");
+    }
+    
+    if (logText) {
+        logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ✅ Instalación cancelada correctamente");
+    }
+    
+    // Forzar actualización
+    QApplication::processEvents();
+    
+    qDebug() << "DEBUG: ✅ Cancelación completada";
+    
+    isCancelling = false;
+}
+
 bool InstallerWindow::extractArchive(const QString &archivePath, const QString &outputDir)
 {
-    // Esta función ya no se usa, pero la mantenemos para compatibilidad
     QProcess tarProcess;
     tarProcess.setWorkingDirectory(outputDir);
     tarProcess.start("tar", QStringList() << "-xf" << archivePath);
@@ -1437,38 +2552,103 @@ bool InstallerWindow::extractArchive(const QString &archivePath, const QString &
 
 void InstallerWindow::createDesktopEntry()
 {
+    logText->append("[INFO] Creando accesos directos...");
+    
+    if (!QDir(installDir).exists()) {
+        logText->append("❌ Error: El directorio de instalación no existe: " + installDir);
+        return;
+    }
+    
+    QString executablePath = installDir + "/Atlas_Interactivo";
+    QString iconPath = installDir + "/resources/logos/icon.png";
+    
+    logText->append("📁 Icono configurado en: " + iconPath);
+    
     QString desktopDir = QDir::homePath() + "/.local/share/applications";
-    QDir().mkpath(desktopDir);
+    if (!QDir().mkpath(desktopDir)) {
+        logText->append("❌ Error: No se pudo crear el directorio: " + desktopDir);
+        return;
+    }
     
     QString desktopFile = desktopDir + "/atlas-interactivo.desktop";
-    QFile file(desktopFile);
     
+    QString desktopContent = QString(
+        "[Desktop Entry]\n"
+        "Version=1.0\n"
+        "Type=Application\n"
+        "Name=Atlas Interactivo\n"
+        "GenericName=Atlas Digital\n"
+        "Comment=Atlas digital interactivo con mapas y datos geográficos\n"
+        "Exec=%1 --no-sandbox\n"
+        "Path=%2\n"
+        "Icon=%3\n"
+        "Terminal=false\n"
+        "Categories=Education;Geography;Science;\n"
+        "Keywords=atlas;map;geography;education;interactive;\n"
+        "StartupNotify=true\n"
+        "StartupWMClass=atlas-interactivo\n"
+    ).arg(executablePath).arg(installDir).arg(iconPath);
+    
+    QFile file(desktopFile);
     if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         QTextStream out(&file);
-        out << "[Desktop Entry]\n";
-        out << "Version=1.0\n";
-        out << "Type=Application\n";
-        out << "Name=Atlas Interactivo\n";
-        out << "Comment=Atlas digital interactivo\n";
-        out << "Exec=" << installDir << "/Atlas_Interactivo-1.0.0-linux-x64\n";
-        out << "Icon=" << installDir << "/icon.png\n";
-        out << "Terminal=false\n";
-        out << "Categories=Education;Geography;\n";
-        out << "StartupNotify=true\n";
+        out << desktopContent;
         file.close();
         
         file.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner |
-                        QFile::ReadGroup | QFile::ExeGroup |
-                        QFile::ReadOther | QFile::ExeOther);
+                            QFile::ReadGroup | QFile::ExeGroup |
+                            QFile::ReadOther | QFile::ExeOther);
         
-        logText->append("✅ Acceso directo creado en menú: " + desktopFile);
+        logText->append("✅ Archivo .desktop creado en: " + desktopFile);
+        logText->append("   Icono configurado: " + iconPath);
+    } else {
+        logText->append("❌ Error: No se pudo escribir el archivo .desktop");
+        return;
     }
     
     if (desktopShortcutCheck->isChecked()) {
         QString desktopShortcut = QDir::homePath() + "/Desktop/Atlas_Interactivo.desktop";
-        QFile::copy(desktopFile, desktopShortcut);
-        logText->append("✅ Acceso directo creado en escritorio");
+        
+        if (QFile::exists(desktopShortcut)) {
+            logText->append("⚠️  Ya existe un acceso directo en el escritorio, sobrescribiendo...");
+            QFile::remove(desktopShortcut);
+        }
+        
+        if (QFile::copy(desktopFile, desktopShortcut)) {
+            QFile shortcutFile(desktopShortcut);
+            shortcutFile.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner |
+                                        QFile::ReadGroup | QFile::ExeGroup |
+                                        QFile::ReadOther | QFile::ExeOther);
+            
+            logText->append("✅ Acceso directo creado en escritorio: " + desktopShortcut);
+        } else {
+            logText->append("⚠️  No se pudo crear el acceso directo en el escritorio");
+        }
     }
+    
+    QProcess updateProcess;
+    updateProcess.start("update-desktop-database", QStringList() << desktopDir);
+    
+    if (updateProcess.waitForFinished(5000)) {
+        if (updateProcess.exitCode() == 0) {
+            logText->append("✅ Base de datos de aplicaciones actualizada");
+        } else {
+            logText->append("⚠️  No se pudo actualizar la base de datos de aplicaciones");
+        }
+    }
+    
+    logText->append("");
+    logText->append("🎉 ACCESOS DIRECTOS CREADOS EXITOSAMENTE");
+    logText->append("========================================");
+    logText->append("• Menú de aplicaciones: Busca 'Atlas Interactivo' en tu menú");
+    
+    if (desktopShortcutCheck->isChecked()) {
+        logText->append("• Escritorio: Icono 'Atlas Interactivo' en tu escritorio");
+    }
+    
+    logText->append("");
+    logText->append("📋 Ruta del ejecutable: " + executablePath);
+    logText->append("📋 Ruta del icono: " + iconPath);
 }
 
 void InstallerWindow::setInstallDir(const QString &dir)
@@ -1493,54 +2673,134 @@ void InstallerWindow::setSkipDesktopShortcuts(bool skip)
     }
 }
 
+void InstallerWindow::closeEvent(QCloseEvent *event)
+{
+    if (m_isInstalling) {
+        QMessageBox msgBox(this);
+        msgBox.setWindowTitle("Instalación en progreso");
+        msgBox.setIcon(QMessageBox::Warning);
+        msgBox.setText("⚠️ Hay una instalación en progreso");
+        msgBox.setInformativeText("¿Estás seguro que deseas salir?\n\n"
+                                 "La instalación será cancelada y todos los archivos temporales serán eliminados.");
+        
+        QPushButton *cancelButton = msgBox.addButton("Continuar instalación", QMessageBox::RejectRole);
+        QPushButton *exitButton = msgBox.addButton("Cancelar y salir", QMessageBox::AcceptRole);
+        
+        msgBox.setDefaultButton(cancelButton);
+        msgBox.exec();
+        
+        if (msgBox.clickedButton() == exitButton) {
+            // Mostrar mensaje de cancelación
+            QMetaObject::invokeMethod(logText, "append", Qt::QueuedConnection,
+                Q_ARG(QString, "[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ⚠️ Cancelando instalación por solicitud del usuario..."));
+            
+            // Esperar un momento para que se muestre el mensaje
+            QApplication::processEvents();
+            QThread::msleep(300);
+            
+            // Cancelar la instalación
+            cancelCurrentInstallation();
+            
+            // Esperar un poco más para que todo se limpie
+            QThread::msleep(500);
+            QApplication::processEvents();
+            
+            event->accept();
+        } else {
+            event->ignore();
+        }
+    } else {
+        QMessageBox::StandardButton reply;
+        reply = QMessageBox::question(this, "Confirmar salida",
+            "¿Estás seguro que deseas salir del instalador?\n\n"
+            "Si tienes una instalación pendiente, podrás reanudarla la próxima vez.",
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        
+        if (reply == QMessageBox::Yes) {
+            event->accept();
+        } else {
+            event->ignore();
+        }
+    }
+}
+
+
 #include "installerwindow.moc"
 EOF
 
-echo "📦 Archivos creados. Compilando..."
-
-# Compilar
+# ========== COMPILAR ==========
+echo "🔧 Compilando con soporte DPI para Qt 5..."
 qmake AtlasInstaller.pro
+
+# Verificar si qmake tuvo éxito
+if [ ! -f "Makefile" ]; then
+    echo "❌ Error: qmake no generó Makefile"
+    echo "   Verifica que Qt esté instalado correctamente"
+    echo ""
+    echo "💡 INSTALACIÓN DE DEPENDENCIAS PARA UBUNTU/DEBIAN:"
+    echo "   sudo apt update"
+    echo "   sudo apt install qt5-default qttools5-dev-tools g++ make"
+    echo "   sudo apt install libqt5widgets5 libqt5gui5 libqt5core5a"
+    exit 1
+fi
+
+echo "⚙️  Ejecutando make..."
 make -j$(nproc)
 
-
+# ========== VERIFICAR COMPILACIÓN ==========
 if [ -f "AtlasInstaller" ]; then
     echo "✅ Compilación exitosa"
     
-    # Optimizar
+    echo "🔧 Optimizando binario..."
     strip AtlasInstaller 2>/dev/null || true
     
-    # Mover
     mv AtlasInstaller ../../AtlasInstallerQt
     
     size_kb=$(du -k ../../AtlasInstallerQt 2>/dev/null | cut -f1 || echo "0")
     size_mb=$(echo "scale=2; $size_kb/1024" | bc 2>/dev/null || echo "0")
     
     echo "📦 Instalador Qt creado: ../AtlasInstallerQt (${size_mb}MB)"
+    
     echo ""
-    echo "✨ CORRECCIONES APLICADAS:"
-    echo "   1. ✅ Solucionado error con archivos pequeños"
-    echo "   2. ✅ ScrollArea añadida para ventanas pequeñas"
-    echo "   3. ✅ Descarga resumible con 3 reintentos"
-    echo "   4. ✅ Extracción por grupos de 50 archivos"
-    echo "   5. ✅ Espacio temporal máximo: 25 GB (mantenido)"
-    echo "   6. ✅ Funciona con cualquier tamaño de archivo"
-    echo "   7. ✅ Progreso visible en tiempo real"
-    echo "   8. ✅ Eliminación automática de temporales"
+    echo "✨ CONSTRUCCIÓN COMPLETADA CON ÉXITO ✨"
+    echo "======================================"
     echo ""
-    echo "📊 RESUMEN:"
-    echo "   • Método: Extracción incremental por grupos"
-    echo "   • Grupos: 50 archivos por lote"
-    echo "   • Descarga: Resumible con 3 reintentos"
-    echo "   • Espacio: 25 GB temporales"
-    echo "   • Final: ~20 GB ocupados permanentemente"
+    echo "📁 ARCHIVOS CREADOS:"
+    echo "  1. 📦 ../AtlasInstallerQt - Ejecutable principal (${size_mb}MB)"
     echo ""
-    echo "🚀 Para ejecutar:"
-    echo "   cd .."
-    echo "   ./AtlasInstallerQt"
+    echo "🎯 CARACTERÍSTICAS:"
+    echo "  ✅ Compatible con Qt 5 (Ubuntu/Debian)"
+    echo "  ✅ Escalado DPI mediante variables de entorno"
+    echo "  ✅ Manejo de cierre corregido"
+    echo "  ✅ Cancelación de instalación robusta"
+    echo ""
+    echo "🚀 MÉTODO DE EJECUCIÓN:"
+    echo "  ./AtlasInstallerQt"
+    echo ""
+    echo "🔧 OPCIONES DE DPI:"
+    echo "  QT_AUTO_SCREEN_SCALE_FACTOR=1 QT_SCALE_FACTOR=1.5 ./AtlasInstallerQt"
+    echo "  ./AtlasInstallerQt --scale-factor 1.5"
+    
 else
     echo "❌ Error: No se creó el ejecutable"
+    echo "   Revisa los mensajes de error anteriores"
+    
+    echo ""
+    echo "🛠️  SOLUCIÓN DE PROBLEMAS:"
+    echo "   1. Verificar que Qt 5 está instalado:"
+    echo "      qmake --version"
+    echo "   2. Instalar Qt 5 en Ubuntu/Debian:"
+    echo "      sudo apt install qt5-default qttools5-dev-tools"
+    echo "   3. Instalar compilador C++:"
+    echo "      sudo apt install g++ make"
+    
     exit 1
 fi
 
+# ========== LIMPIAR ==========
 cd ..
-rm -r build_qt/
+rm -r build_qt/ 2>/dev/null || true
+
+echo ""
+echo "✅ Script completado. ¡Instalador listo con manejo de cierre corregido!"
