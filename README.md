@@ -4,7 +4,7 @@
 Sistema de distribución inteligente para Atlas Interactivo usando GitHub Pages + Google Drive.
 
 ## 🚀 Instalación
-1. Visita la página web: https://tusuario.github.io/atlas-distribution/
+1. Visita la página web: https://adrianfb94.github.io/atlas-distribution/
 2. Descarga el instalador para tu sistema operativo
 3. Sigue la guía correspondiente
 
