@@ -8,9 +8,1421 @@ using System.IO.Compression;
 using System.ComponentModel;
 using System.Linq;
 using System.Text;
+using System.Collections.Generic;
+using System.Threading;
+using System.Net.Http;
+using System.Text.RegularExpressions;
+using System.Diagnostics; // NECESARIO para Process
+
+
+// zip install page: https://www.7-zip.org/download.html 
 
 namespace AtlasInstaller
 {
+
+
+    // ========== CLASE PRINCIPAL PARA DESCARGA Y EXTRACCIÓN ==========
+    public class BufferedTarDownloader : IDisposable
+    {
+        private const int BUFFER_SIZE = 81920;
+        private const long MAXIMUM_BUFFER_SIZE = 5L * 1024L * 1024L * 1024L; // 5 GB máximo
+        
+        private readonly string _url;
+        private readonly string _extractPath;
+        private readonly IProgress<int> _progress;
+        private readonly CancellationToken _cancellationToken;
+        
+        private FileStream _tempFileStream;
+        private long _totalBytesRead = 0;
+        private long _totalBytesToRead = 0;
+        private bool _isDisposed = false;
+        private long _lastReportTime = 0;
+        private string _tempTarPath;
+        
+        private DateTime _startTime;
+
+        public event EventHandler<string> LogMessage;
+        public event EventHandler<string> StatusUpdate;
+            
+        public BufferedTarDownloader(string url, string extractPath, IProgress<int> progress, CancellationToken cancellationToken)
+        {
+            _url = url;
+            _extractPath = extractPath;
+            _progress = progress;
+            _cancellationToken = cancellationToken;
+        }
+
+        private void OnLogMessage(string message)
+        {
+            LogMessage?.Invoke(this, message);
+        }
+
+        private void OnStatusUpdate(string status)
+        {
+            StatusUpdate?.Invoke(this, status);
+        }
+
+
+        public async Task<bool> DownloadAndExtractIncremental()
+        {
+            _tempTarPath = Path.Combine(Path.GetTempPath(), $"atlas_{Guid.NewGuid():N}.tar");
+            
+            try
+            {
+                OnLogMessage("🚀 INICIANDO DESCARGA Y EXTRACCIÓN");
+                OnLogMessage($"📁 Archivo temporal: {_tempTarPath}");
+                OnLogMessage($"📁 Extraer a: {_extractPath}");
+                
+                // VERIFICAR SI YA EXISTE LA INSTALACIÓN
+                if (IsInstallationComplete(_extractPath))
+                {
+                    OnLogMessage("✅ Instalación ya completa detectada");
+                    OnLogMessage($"📊 Directorio contiene: {CountExtractedFiles(_extractPath)} archivos");
+                    return true;
+                }
+                
+                // Crear directorio de extracción
+                Directory.CreateDirectory(_extractPath);
+                
+                // 1. Primero descargar COMPLETAMENTE el archivo
+                OnLogMessage("📥 Descargando archivo TAR...");
+                bool downloadSuccess = await DownloadToFile(_tempTarPath);
+                
+                if (!downloadSuccess)
+                {
+                    OnLogMessage("❌ Falló la descarga del archivo TAR");
+                    return false;
+                }
+                
+                // 2. CERRAR completamente el stream de archivo antes de proceder
+                OnLogMessage("✅ Descarga completada, cerrando archivo...");
+                if (_tempFileStream != null)
+                {
+                    _tempFileStream.Close();
+                    _tempFileStream.Dispose();
+                    _tempFileStream = null;
+                }
+                
+                // 3. Pequeña pausa para asegurar que el sistema operativo libere el archivo
+                await Task.Delay(1000);
+                
+                // 4. Verificar que el archivo existe y es accesible
+                if (!File.Exists(_tempTarPath))
+                {
+                    OnLogMessage("❌ Archivo TAR no encontrado después de la descarga");
+                    return false;
+                }
+                
+                FileInfo downloadedFile = new FileInfo(_tempTarPath);
+                double sizeGB = downloadedFile.Length / (1024.0 * 1024.0 * 1024.0);
+                OnLogMessage($"📊 Tamaño del archivo TAR: {sizeGB:F2} GB");
+                OnLogMessage($"📊 Archivo accesible: {(downloadedFile.IsReadOnly ? "Sí" : "Sí, no es de solo lectura")}");
+                
+                // 5. INTENTAR EXTRAER CON 7-ZIP
+                OnLogMessage("🔧 Iniciando extracción con 7-zip...");
+                bool extractSuccess = await ExtractAllWith7Zip(_tempTarPath, _extractPath);
+                
+                return extractSuccess;
+            }
+            catch (Exception ex)
+            {
+                OnLogMessage($"❌ ERROR: {ex.Message}");
+                OnLogMessage($"📋 Stack trace: {ex.StackTrace}");
+                return false;
+            }
+            finally
+            {
+                Cleanup();
+            }
+        }
+
+        private async Task<bool> DownloadToFile(string filePath)
+        {
+            try
+            {
+                using (var client = CreateHttpClient())
+                {
+                    // Obtener tamaño total primero
+                    await GetTotalFileSize();
+                    
+                    using (var response = await client.GetAsync(_url, HttpCompletionOption.ResponseHeadersRead, _cancellationToken))
+                    using (var stream = await response.Content.ReadAsStreamAsync())
+                    {
+                        // Crear archivo nuevo cada vez
+                        using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, BUFFER_SIZE, FileOptions.Asynchronous))
+                        {
+                            byte[] buffer = new byte[BUFFER_SIZE];
+                            int bytesRead;
+                            _totalBytesRead = 0;
+                            _startTime = DateTime.Now;
+                            
+                            while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, _cancellationToken)) > 0)
+                            {
+                                _cancellationToken.ThrowIfCancellationRequested();
+                                
+                                await fileStream.WriteAsync(buffer, 0, bytesRead, _cancellationToken);
+                                await fileStream.FlushAsync(); // Forzar escritura inmediata
+                                
+                                _totalBytesRead += bytesRead;
+                                UpdateProgressWithETA();
+                            }
+                            
+                            // Cerrar y liberar el archivo inmediatamente
+                            await fileStream.FlushAsync();
+                        }
+                    }
+                    
+                    OnLogMessage($"✅ Descarga completada: {_totalBytesRead / (1024.0 * 1024.0 * 1024.0):F2} GB");
+                    return true;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                OnLogMessage("Descarga cancelada");
+                throw;
+            }
+            catch (Exception ex)
+            {
+                OnLogMessage($"❌ Error HTTP: {ex.Message}");
+                return false;
+            }
+        }
+
+        private async Task<bool> ExtractWithQtMethod(string tarPath, string extractPath)
+        {
+            try
+            {
+                OnLogMessage("🔄 Método Qt: Extracción por grupos con 7-zip");
+                
+                // 1. Verificar archivo
+                if (!File.Exists(tarPath))
+                {
+                    OnLogMessage($"❌ ERROR: Archivo TAR no existe: {tarPath}");
+                    return false;
+                }
+                
+                FileInfo tarInfo = new FileInfo(tarPath);
+                OnLogMessage($"✅ Archivo TAR: {tarPath}");
+                OnLogMessage($"📊 Tamaño: {tarInfo.Length / (1024.0 * 1024.0 * 1024.0):F2} GB");
+                
+                // 2. Verificar 7-zip
+                string sevenZipPath = Get7ZipPath();
+                if (!File.Exists(sevenZipPath))
+                {
+                    OnLogMessage($"❌ ERROR: 7-zip no encontrado en: {sevenZipPath}");
+                    OnLogMessage("💡 Por favor, instale 7-zip desde: https://www.7-zip.org/");
+                    return false;
+                }
+                
+                OnLogMessage($"✅ 7-zip encontrado: {sevenZipPath}");
+                
+                // INTENTAR EXTRACCIÓN COMPLETA DIRECTAMENTE (MÁS SIMPLE)
+                OnLogMessage("🔧 Extrayendo archivo completo con 7-zip...");
+                return await ExtractAllWith7Zip(tarPath, extractPath);
+            }
+            catch (Exception ex)
+            {
+                OnLogMessage($"❌ Error en extracción Qt: {ex.Message}");
+                OnLogMessage($"📋 Stack trace: {ex.StackTrace}");
+                return false;
+            }
+        }
+
+        // Clase para almacenar información de archivos TAR
+        private class TarFileInfo
+        {
+            public string Name { get; set; }
+            public bool IsDirectory { get; set; }
+            public long Size { get; set; }
+            public DateTime ModifiedDate { get; set; }
+        }
+
+        // Método para obtener lista de archivos usando 7-zip (comando: 7z l test.tar)
+// Método para obtener lista de archivos usando 7-zip (comando: 7z l test.tar)
+        private async Task<List<TarFileInfo>> GetTarFileListWith7Zip(string tarPath)
+        {
+            return await Task.Run(() =>
+            {
+                var fileList = new List<TarFileInfo>();
+                
+                try
+                {
+                    string sevenZipPath = Get7ZipPath();
+                    
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = $"\"{sevenZipPath}\"",
+                        Arguments = $"l \"{tarPath}\"",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true,
+                        StandardOutputEncoding = Encoding.UTF8
+                    };
+                    
+                    using (Process process = new Process())
+                    {
+                        process.StartInfo = psi;
+                        process.Start();
+                        
+                        // Leer la salida línea por línea
+                        string output = process.StandardOutput.ReadToEnd();
+                        process.WaitForExit(30000); // 30 segundos timeout
+                        
+                        // Parsear la salida (formato similar al que mostraste)
+                        bool inFileList = false;
+                        string[] lines = output.Split(new[] { '\n' }, StringSplitOptions.None);
+                        
+                        foreach (string line in lines)
+                        {
+                            string trimmedLine = line.Trim();
+                            
+                            // Buscar el inicio de la lista de archivos
+                            if (trimmedLine.Contains("------------------- ----- ------------ ------------"))
+                            {
+                                inFileList = true;
+                                continue;
+                            }
+                            
+                            // Buscar el fin de la lista de archivos
+                            if (inFileList && trimmedLine.Contains("------------------- ----- ------------ ------------"))
+                            {
+                                break;
+                            }
+                            
+                            // Procesar líneas de archivos
+                            if (inFileList && !string.IsNullOrWhiteSpace(trimmedLine))
+                            {
+                                try
+                                {
+                                    // Parsear la línea según el formato de 7-zip
+                                    // Ejemplo: "2026-01-03 20:10:53 D....            0            0  Atlas_Interactivo-1.0.0-win32-x64"
+                                    
+                                    // Verificar si es un directorio (contiene "D....")
+                                    bool isDirectory = trimmedLine.Contains("D....");
+                                    
+                                    // **SOLUCIÓN CORRECTA PARA .NET FRAMEWORK 4.x**
+                                    // En .NET Framework 4.x, Split(char[], StringSplitOptions) no existe
+                                    // Usamos Split(params char[]) y luego filtramos manualmente
+                                    string[] rawParts = trimmedLine.Split(new char[] { ' ' });
+                                    List<string> parts = new List<string>();
+                                    
+                                    foreach (string part in rawParts)
+                                    {
+                                        if (!string.IsNullOrWhiteSpace(part))
+                                        {
+                                            parts.Add(part);
+                                        }
+                                    }
+                                    
+                                    if (parts.Count >= 6)
+                                    {
+                                        string fileName = parts[parts.Count - 1];
+                                        
+                                        // Saltar archivos especiales de TAR
+                                        if (fileName.Contains("PaxHeaders") || fileName.StartsWith("."))
+                                        {
+                                            continue;
+                                        }
+                                        
+                                        // Extraer tamaño si es archivo
+                                        long size = 0;
+                                        if (!isDirectory && parts.Count >= 4)
+                                        {
+                                            long.TryParse(parts[3], out size);
+                                        }
+                                        
+                                        // Extraer fecha
+                                        DateTime date = DateTime.Now;
+                                        if (parts.Count >= 2)
+                                        {
+                                            string dateStr = parts[0] + " " + parts[1];
+                                            DateTime.TryParse(dateStr, out date);
+                                        }
+                                        
+                                        fileList.Add(new TarFileInfo
+                                        {
+                                            Name = fileName,
+                                            IsDirectory = isDirectory,
+                                            Size = size,
+                                            ModifiedDate = date
+                                        });
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    OnLogMessage($"⚠️ Error parseando línea: {trimmedLine}");
+                                    OnLogMessage($"   Error: {ex.Message}");
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (fileList.Count == 0)
+                    {
+                        OnLogMessage("⚠️ No se pudieron obtener archivos, usando método alternativo...");
+                        // Método alternativo: intentar con tar.exe si está disponible
+                        fileList = GetTarFileListWithTarExe(tarPath);
+                    }
+                    
+                    OnLogMessage($"📊 Archivos encontrados: {fileList.Count}");
+                    return fileList;
+                }
+                catch (Exception ex)
+                {
+                    OnLogMessage($"⚠️ Error con 7-zip: {ex.Message}");
+                    // Método alternativo
+                    return GetTarFileListWithTarExe(tarPath);
+                }
+            });
+        }
+
+        // Método alternativo usando tar.exe (si está disponible)
+        private List<TarFileInfo> GetTarFileListWithTarExe(string tarPath)
+        {
+            var fileList = new List<TarFileInfo>();
+            
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = "tar",
+                    Arguments = $"tf \"{tarPath}\"",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8
+                };
+                
+                using (Process process = new Process())
+                {
+                    process.StartInfo = psi;
+                    process.Start();
+                    
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit(30000);
+                    
+                    // **SOLUCIÓN CORRECTA PARA .NET FRAMEWORK 4.x**
+                    string[] allLines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.None);
+                    List<string> linesList = new List<string>();
+
+                    foreach (string line in allLines)
+                    {
+                        string trimmedLine = line.Trim();
+                        if (!string.IsNullOrWhiteSpace(trimmedLine))
+                        {
+                            linesList.Add(trimmedLine);
+                        }
+                    }
+
+                    string[] lines = linesList.ToArray();
+
+
+                    foreach (string line in lines)
+                    {
+                        string trimmedLine = line.Trim();
+                        if (!string.IsNullOrEmpty(trimmedLine) && 
+                            !trimmedLine.Contains("PaxHeaders"))
+                        {
+                            bool isDirectory = trimmedLine.EndsWith("/");
+                            string fileName = isDirectory ? trimmedLine.TrimEnd('/') : trimmedLine;
+                            
+                            fileList.Add(new TarFileInfo
+                            {
+                                Name = fileName,
+                                IsDirectory = isDirectory,
+                                Size = 0,
+                                ModifiedDate = DateTime.Now
+                            });
+                        }
+                    }
+                }
+                
+                OnLogMessage($"✅ Lista obtenida con tar.exe: {fileList.Count} elementos");
+            }
+            catch (Exception ex)
+            {
+                OnLogMessage($"❌ tar.exe también falló: {ex.Message}");
+            }
+            
+            return fileList;
+        }
+
+        // Método para extraer solo directorios primero
+        private async Task<bool> ExtractDirectories(string tarPath, string extractPath, List<string> directories, int stripComponents)
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    if (directories.Count == 0)
+                        return true;
+                    
+                    OnLogMessage($"📂 Creando {directories.Count} directorios...");
+                    
+                    // Crear archivo de lista temporal
+                    string listFile = Path.GetTempFileName();
+                    File.WriteAllLines(listFile, directories);
+                    
+                    try
+                    {
+                        string sevenZipPath = Get7ZipPath();
+                        
+                        // Extraer solo los directorios primero
+                        string args = $"x \"{tarPath}\" -o\"{extractPath}\" -aoa";
+                        
+                        ProcessStartInfo psi = new ProcessStartInfo
+                        {
+                            FileName = $"\"{sevenZipPath}\"",
+                            Arguments = args,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+                        
+                        using (Process process = new Process())
+                        {
+                            process.StartInfo = psi;
+                            process.Start();
+                            
+                            // Solo extraer estructura, no esperar a que termine completamente
+                            process.WaitForExit(30000); // 30 segundos máximo
+                            
+                            if (process.ExitCode != 0)
+                            {
+                                OnLogMessage($"⚠️ 7-zip directorios falló con código: {process.ExitCode}");
+                                // Continuar de todos modos, la extracción de archivos creará los directorios
+                            }
+                        }
+                        
+                        // También crear directorios manualmente por si acaso
+                        foreach (string dir in directories)
+                        {
+                            string targetDir = dir;
+                            
+                            // Aplicar strip-components si es necesario
+                            if (stripComponents > 0)
+                            {
+                                string[] parts = dir.Split('/');
+                                if (parts.Length > stripComponents)
+                                {
+                                    targetDir = string.Join("/", parts.Skip(stripComponents));
+                                }
+                                else
+                                {
+                                    continue; // Saltar si el directorio está en el prefijo a remover
+                                }
+                            }
+                            
+                            if (!string.IsNullOrEmpty(targetDir))
+                            {
+                                string fullPath = Path.Combine(extractPath, targetDir);
+                                try
+                                {
+                                    Directory.CreateDirectory(fullPath);
+                                }
+                                catch { }
+                            }
+                        }
+                        
+                        OnLogMessage($"✅ {directories.Count} directorios preparados");
+                        return true;
+                    }
+                    finally
+                    {
+                        try { File.Delete(listFile); } catch { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OnLogMessage($"⚠️ Error creando directorios: {ex.Message}");
+                    return false; // No es crítico, continuar
+                }
+            });
+        }
+
+        // Método para extraer grupo específico de archivos
+        private async Task<bool> ExtractFileGroupWith7Zip(string tarPath, string extractPath, List<string> files, int stripComponents)
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    if (files.Count == 0)
+                        return true;
+                    
+                    OnLogMessage($"📄 Extrayendo {files.Count} archivos...");
+                    
+                    // Para 7-zip, necesitamos extraer archivos específicos
+                    // 7-zip no soporta -T como tar, así que usamos un enfoque diferente
+                    
+                    string sevenZipPath = Get7ZipPath();
+                    
+                    // Crear archivo de lista temporal
+                    string listFile = Path.GetTempFileName();
+                    File.WriteAllLines(listFile, files);
+                    
+                    try
+                    {
+                        // Para archivos específicos con 7-zip, necesitamos usar patrones
+                        // Esto es más complejo porque 7-zip no extrae por lista como tar
+                        
+                        // Enfoque: Extraer todo el TAR pero solo mantener los archivos que necesitamos
+                        // Usar directorio temporal primero
+                        string tempExtractDir = Path.Combine(Path.GetTempPath(), $"atlas_extract_{Guid.NewGuid():N}");
+                        Directory.CreateDirectory(tempExtractDir);
+                        
+                        try
+                        {
+                            // Extraer TODO a directorio temporal
+                            string args = $"x \"{tarPath}\" -o\"{tempExtractDir}\" -aoa";
+                            
+                            ProcessStartInfo psi = new ProcessStartInfo
+                            {
+                                FileName = $"\"{sevenZipPath}\"",
+                                Arguments = args,
+                                UseShellExecute = false,
+                                RedirectStandardOutput = true,
+                                CreateNoWindow = true
+                            };
+                            
+                            using (Process process = new Process())
+                            {
+                                process.StartInfo = psi;
+                                process.Start();
+                                
+                                // Leer salida para monitorear
+                                StringBuilder output = new StringBuilder();
+                                process.OutputDataReceived += (s, e) => {
+                                    if (!string.IsNullOrEmpty(e.Data))
+                                    {
+                                        output.AppendLine(e.Data);
+                                    }
+                                };
+                                
+                                process.BeginOutputReadLine();
+                                bool completed = process.WaitForExit(180000); // 3 minutos
+                                
+                                if (!completed)
+                                {
+                                    OnLogMessage("❌ Timeout extrayendo grupo");
+                                    process.Kill();
+                                    return false;
+                                }
+                                
+                                if (process.ExitCode != 0)
+                                {
+                                    OnLogMessage($"⚠️ 7-zip falló con código: {process.ExitCode}");
+                                    return false;
+                                }
+                            }
+                            
+                            // Ahora mover solo los archivos que necesitamos al destino final
+                            int movedCount = 0;
+                            foreach (string file in files)
+                            {
+                                try
+                                {
+                                    string sourcePath = Path.Combine(tempExtractDir, file);
+                                    string targetPath = Path.Combine(extractPath, ApplyStripComponents(file, stripComponents));
+                                    
+                                    if (File.Exists(sourcePath))
+                                    {
+                                        // Crear directorio destino si no existe
+                                        Directory.CreateDirectory(Path.GetDirectoryName(targetPath));
+                                        
+                                        // Mover archivo
+                                        // File.Move(sourcePath, targetPath, true);
+                                        if (File.Exists(targetPath))
+                                        {
+                                            File.Delete(targetPath);
+                                        }
+                                        File.Move(sourcePath, targetPath);                                        
+                                        movedCount++;
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    OnLogMessage($"⚠️ Error moviendo archivo {file}: {ex.Message}");
+                                }
+                            }
+                            
+                            OnLogMessage($"✅ Moved {movedCount}/{files.Count} archivos del grupo");
+                            return movedCount > 0;
+                        }
+                        finally
+                        {
+                            // Limpiar directorio temporal
+                            try
+                            {
+                                Directory.Delete(tempExtractDir, true);
+                            }
+                            catch { }
+                        }
+                    }
+                    finally
+                    {
+                        try { File.Delete(listFile); } catch { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OnLogMessage($"❌ Error extrayendo grupo: {ex.Message}");
+                    return false;
+                }
+            });
+        }
+
+        // Método auxiliar para aplicar strip-components
+        private string ApplyStripComponents(string path, int stripComponents)
+        {
+            if (stripComponents <= 0) return path;
+            string[] parts = path.Split('/');
+            if (parts.Length > stripComponents)
+            {
+                return string.Join("/", parts.Skip(stripComponents));
+            }
+            
+            return path; // Si no hay suficientes partes, devolver original
+        }
+
+
+        private async Task<bool> ExtractAllWith7Zip(string tarPath, string extractPath)
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    OnLogMessage("🔄 Extrayendo archivo completo con 7-zip...");
+                    
+                    string sevenZipPath = Get7ZipPath();
+                    
+                    // 1. VERIFICAR QUE EL ARCHIVO NO ESTÁ BLOQUEADO
+                    OnLogMessage("🔍 Verificando acceso al archivo TAR...");
+                    try
+                    {
+                        using (var testStream = new FileStream(tarPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                        {
+                            // Si podemos abrirlo en modo lectura compartida, está disponible
+                            OnLogMessage("✅ Archivo TAR está disponible para lectura");
+                        }
+                    }
+                    catch (IOException ioEx)
+                    {
+                        OnLogMessage($"❌ Archivo TAR está bloqueado: {ioEx.Message}");
+                        OnLogMessage("🔄 Esperando 2 segundos y reintentando...");
+                        Thread.Sleep(2000);
+                        
+                        // Reintentar
+                        try
+                        {
+                            using (var testStream = new FileStream(tarPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                            {
+                                OnLogMessage("✅ Archivo TAR ahora está disponible");
+                            }
+                        }
+                        catch
+                        {
+                            OnLogMessage("❌ Archivo aún bloqueado después de espera");
+                            return false;
+                        }
+                    }
+                    
+                    // 2. Crear directorio destino si no existe
+                    if (!Directory.Exists(extractPath))
+                    {
+                        Directory.CreateDirectory(extractPath);
+                        OnLogMessage($"📁 Directorio creado: {extractPath}");
+                    }
+                    
+                    // 3. Preparar comando 7-zip
+                    string arguments = $"x \"{tarPath}\" -o\"{extractPath}\" -aoa -y -bso0 -bsp1";
+                    OnLogMessage($"🔧 Comando 7-zip: \"{sevenZipPath}\" {arguments}");
+                    
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = $"\"{sevenZipPath}\"",
+                        Arguments = arguments,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true,
+                        WorkingDirectory = Path.GetDirectoryName(tarPath)
+                    };
+                    
+                    using (Process process = new Process())
+                    {
+                        process.StartInfo = psi;
+                        process.Start();
+                        
+                        // Leer salida en tiempo real
+                        StringBuilder output = new StringBuilder();
+                        StringBuilder error = new StringBuilder();
+                        
+                        process.OutputDataReceived += (s, e) => {
+                            if (!string.IsNullOrEmpty(e.Data))
+                            {
+                                output.AppendLine(e.Data);
+                                OnLogMessage($"[7z] {e.Data}");
+                            }
+                        };
+                        
+                        process.ErrorDataReceived += (s, e) => {
+                            if (!string.IsNullOrEmpty(e.Data))
+                            {
+                                error.AppendLine(e.Data);
+                                OnLogMessage($"❌ [7z-error] {e.Data}");
+                            }
+                        };
+                        
+                        process.BeginOutputReadLine();
+                        process.BeginErrorReadLine();
+                        
+                        // Esperar con timeout más largo
+                        bool completed = process.WaitForExit(600000); // 10 minutos timeout
+                        
+                        if (!completed)
+                        {
+                            OnLogMessage("❌ Timeout en extracción completa");
+                            try { process.Kill(); } catch { }
+                            return false;
+                        }
+                        
+                        OnLogMessage($"✅ 7-zip terminó con código: {process.ExitCode}");
+                        
+                        if (process.ExitCode == 0)
+                        {
+                            OnLogMessage("✅ Extracción completa exitosa");
+                            
+                            // Verificar archivos extraídos
+                            if (Directory.Exists(extractPath))
+                            {
+                                string[] extractedFiles = Directory.GetFiles(extractPath, "*", SearchOption.AllDirectories);
+                                string[] extractedDirs = Directory.GetDirectories(extractPath, "*", SearchOption.AllDirectories);
+                                
+                                OnLogMessage($"📊 Extracción completada: {extractedFiles.Length} archivos, {extractedDirs.Length} directorios");
+                                
+                                // Verificar archivo ejecutable principal
+                                string[] exeFiles = Directory.GetFiles(extractPath, "*.exe", SearchOption.AllDirectories);
+                                if (exeFiles.Length > 0)
+                                {
+                                    OnLogMessage($"🎯 Ejecutable principal: {Path.GetFileName(exeFiles[0])}");
+                                }
+                            }
+                            
+                            return true;
+                        }
+                        else
+                        {
+                            OnLogMessage($"❌ 7-zip falló con código: {process.ExitCode}");
+                            
+                            // Intentar método alternativo si falla
+                            if (process.ExitCode == 2) // Error fatal
+                            {
+                                OnLogMessage("⚠️ Intentando método alternativo de extracción...");
+                                return ExtractWithAlternativeMethod(tarPath, extractPath);
+                            }
+                            
+                            return false;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    OnLogMessage($"❌ Error en extracción: {ex.Message}");
+                    OnLogMessage($"📋 Stack trace: {ex.StackTrace}");
+                    return false;
+                }
+            });
+        }
+
+
+        private bool ExtractWithAlternativeMethod(string tarPath, string extractPath)
+        {
+            try
+            {
+                OnLogMessage("🔄 Usando método alternativo: extracción por partes...");
+                
+                // Crear directorio temporal para extracción
+                string tempExtractDir = Path.Combine(Path.GetTempPath(), $"atlas_temp_{Guid.NewGuid():N}");
+                Directory.CreateDirectory(tempExtractDir);
+                
+                try
+                {
+                    string sevenZipPath = Get7ZipPath();
+                    
+                    // Paso 1: Listar contenido
+                    OnLogMessage("📋 Listando contenido del TAR...");
+                    ProcessStartInfo listPsi = new ProcessStartInfo
+                    {
+                        FileName = $"\"{sevenZipPath}\"",
+                        Arguments = $"l \"{tarPath}\"",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        CreateNoWindow = true
+                    };
+                    
+                    List<string> fileList = new List<string>();
+                    using (Process listProcess = new Process())
+                    {
+                        listProcess.StartInfo = listPsi;
+                        listProcess.Start();
+                        string listOutput = listProcess.StandardOutput.ReadToEnd();
+                        listProcess.WaitForExit();
+                        
+                        // Parsear lista (simplificado)
+                        string[] lines = listOutput.Split('\n');
+                        foreach (string line in lines)
+                        {
+                            if (line.Contains("Atlas_Interactivo") && !line.Contains("D...."))
+                            {
+                                int nameStart = line.LastIndexOf("  ") + 2;
+                                if (nameStart > 2)
+                                {
+                                    string fileName = line.Substring(nameStart).Trim();
+                                    if (!string.IsNullOrEmpty(fileName))
+                                    {
+                                        fileList.Add(fileName);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    OnLogMessage($"📊 Encontrados {fileList.Count} archivos para extraer");
+                    
+                    // Paso 2: Extraer archivos importantes primero
+                    if (fileList.Count > 0)
+                    {
+                        // Extraer los primeros 10 archivos para prueba
+                        foreach (string file in fileList.Take(10))
+                        {
+                            OnLogMessage($"📄 Extrayendo: {file}");
+                            ProcessStartInfo extractPsi = new ProcessStartInfo
+                            {
+                                FileName = $"\"{sevenZipPath}\"",
+                                Arguments = $"e \"{tarPath}\" \"{file}\" -o\"{extractPath}\" -aoa -y",
+                                UseShellExecute = false,
+                                CreateNoWindow = true
+                            };
+                            
+                            using (Process extractProcess = new Process())
+                            {
+                                extractProcess.StartInfo = extractPsi;
+                                extractProcess.Start();
+                                extractProcess.WaitForExit(30000);
+                            }
+                        }
+                        
+                        // Verificar si se extrajo algo
+                        string[] extracted = Directory.GetFiles(extractPath, "*", SearchOption.AllDirectories);
+                        if (extracted.Length > 0)
+                        {
+                            OnLogMessage($"✅ Método alternativo extrajo {extracted.Length} archivos");
+                            return true;
+                        }
+                    }
+                    
+                    return false;
+                }
+                finally
+                {
+                    // Limpiar directorio temporal
+                    try { Directory.Delete(tempExtractDir, true); } catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                OnLogMessage($"❌ Método alternativo también falló: {ex.Message}");
+                return false;
+            }
+        }
+
+        // Método auxiliar para split compatible con .NET Framework 4.x
+        private string[] SplitString(string input, string[] separators)
+        {
+            List<string> result = new List<string>();
+            string[] temp = input.Split(separators, StringSplitOptions.None);
+            
+            foreach (string part in temp)
+            {
+                if (!string.IsNullOrWhiteSpace(part))
+                {
+                    result.Add(part);
+                }
+            }
+            
+            return result.ToArray();
+        }        
+
+
+
+        // Método para detectar prefijo común (como Qt)
+        private string DetectPrefix(List<string> fileList)
+        {
+            if (fileList.Count == 0) return "";
+            
+            // Tomar el primer archivo como referencia
+            string firstFile = fileList[0];
+            
+            // Buscar el primer directorio en la ruta
+            if (firstFile.Contains('/'))
+            {
+                int firstSlash = firstFile.IndexOf('/');
+                string potentialPrefix = firstFile.Substring(0, firstSlash + 1);
+                
+                // Verificar que al menos el 90% de los archivos tengan este prefijo
+                int matchingCount = 0;
+                int checkCount = Math.Min(100, fileList.Count); // Verificar máximo 100 archivos
+                
+                for (int i = 0; i < checkCount; i++)
+                {
+                    if (fileList[i].StartsWith(potentialPrefix))
+                    {
+                        matchingCount++;
+                    }
+                }
+                
+                if (matchingCount >= checkCount * 0.9) // 90% coincidencia
+                {
+                    return potentialPrefix;
+                }
+            }
+            
+            return "";
+        }
+
+        // Método para reorganizar archivos extraídos (mover fuera del directorio con prefijo)
+        private async Task ReorganizeExtractedFiles(string extractPath, string prefix)
+        {
+            await Task.Run(() =>
+            {
+                try
+                {
+                    string prefixDir = prefix.TrimEnd('/');
+                    string sourceDir = Path.Combine(extractPath, prefixDir);
+                    
+                    if (!Directory.Exists(sourceDir))
+                    {
+                        OnLogMessage($"⚠️ No se encontró directorio con prefijo: {prefixDir}");
+                        return;
+                    }
+                    
+                    OnLogMessage($"🔄 Reorganizando: Moviendo archivos desde {prefixDir}/...");
+                    
+                    // Mover todos los archivos un nivel arriba
+                    string[] items = Directory.GetFileSystemEntries(sourceDir, "*", SearchOption.AllDirectories);
+                    
+                    int movedCount = 0;
+                    int errorCount = 0;
+                    
+                    foreach (string item in items)
+                    {
+                        _cancellationToken.ThrowIfCancellationRequested();
+                        
+                        string relativePath = item.Substring(sourceDir.Length + 1);
+                        string destPath = Path.Combine(extractPath, relativePath);
+                        
+                        // Crear directorio destino si no existe
+                        Directory.CreateDirectory(Path.GetDirectoryName(destPath));
+                        
+                        try
+                        {
+                            if (File.Exists(item))
+                            {
+                                // Si el archivo destino ya existe, eliminarlo primero
+                                if (File.Exists(destPath))
+                                {
+                                    File.Delete(destPath);
+                                }
+                                
+                                File.Move(item, destPath);
+                                movedCount++;
+                                
+                                // Mostrar progreso cada 100 archivos
+                                if (movedCount % 100 == 0)
+                                {
+                                    OnLogMessage($"   {movedCount} archivos movidos...");
+                                }
+                            }
+                            else if (Directory.Exists(item) && Directory.GetFileSystemEntries(item).Length == 0)
+                            {
+                                // Directorio vacío - eliminarlo
+                                Directory.Delete(item);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            errorCount++;
+                            if (errorCount <= 5) // Mostrar solo los primeros 5 errores
+                            {
+                                OnLogMessage($"⚠️ Error moviendo {Path.GetFileName(item)}: {ex.Message}");
+                            }
+                        }
+                    }
+                    
+                    // Intentar eliminar directorio fuente si está vacío
+                    try
+                    {
+                        if (Directory.Exists(sourceDir) && !Directory.GetFileSystemEntries(sourceDir).Any())
+                        {
+                            Directory.Delete(sourceDir);
+                            OnLogMessage($"🗑️ Directorio vacío eliminado: {prefixDir}");
+                        }
+                        else if (Directory.Exists(sourceDir))
+                        {
+                            OnLogMessage($"⚠️ Directorio {prefixDir} no está vacío, no se puede eliminar");
+                        }
+                    }
+                    catch { }
+                    
+                    OnLogMessage($"✅ Reorganización completada: {movedCount} archivos movidos, {errorCount} errores");
+                }
+                catch (Exception ex)
+                {
+                    OnLogMessage($"⚠️ Error reorganizando archivos: {ex.Message}");
+                }
+            });
+        }
+
+
+
+        private string Get7ZipPath()
+        {
+            try
+            {
+                // Rutas absolutas primero
+                string[] possiblePaths = {
+                    @"C:\Program Files\7-Zip\7z.exe",
+                    @"C:\Program Files (x86)\7-Zip\7z.exe"
+                };
+                
+                foreach (string path in possiblePaths)
+                {
+                    if (File.Exists(path))
+                    {
+                        OnLogMessage($"✅ 7-zip encontrado en: {path}");
+                        return path;
+                    }
+                }
+                
+                // Si no está en rutas absolutas, devolver la ruta por defecto
+                OnLogMessage("⚠️ Usando ruta por defecto de 7-zip");
+                return @"C:\Program Files\7-Zip\7z.exe";
+            }
+            catch
+            {
+                return @"C:\Program Files\7-Zip\7z.exe";
+            }
+        }
+
+
+        private async Task GetTotalFileSize()
+        {
+            try
+            {
+                using (var client = CreateHttpClient())
+                using (var request = new HttpRequestMessage(HttpMethod.Head, _url))
+                {
+                    var response = await client.SendAsync(request, _cancellationToken);
+                    if (response.Content.Headers.ContentLength.HasValue)
+                    {
+                        _totalBytesToRead = response.Content.Headers.ContentLength.Value;
+                        OnLogMessage($"📊 Tamaño total estimado: {_totalBytesToRead / (1024.0 * 1024.0 * 1024.0):F2} GB");
+                    }
+                    else
+                    {
+                        _totalBytesToRead = 20L * 1024L * 1024L * 1024L; // Asumir 20 GB
+                        OnLogMessage($"📊 Tamaño estimado (fallback): {_totalBytesToRead / (1024.0 * 1024.0 * 1024.0):F2} GB");
+                    }
+                }
+            }
+            catch
+            {
+                _totalBytesToRead = 20L * 1024L * 1024L * 1024L;
+                OnLogMessage($"📊 Usando tamaño estimado: {_totalBytesToRead / (1024.0 * 1024.0 * 1024.0):F2} GB");
+            }
+        }
+
+        private HttpClient CreateHttpClient()
+        {
+            var handler = new HttpClientHandler
+            {
+                UseCookies = true,
+                CookieContainer = new CookieContainer(),
+                AllowAutoRedirect = true,
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+                UseProxy = false
+            };
+            
+            var client = new HttpClient(handler);
+            client.Timeout = TimeSpan.FromHours(3);
+            client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+            client.DefaultRequestHeaders.Add("Accept", "*/*");
+            client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
+            client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip, deflate, br");
+            client.DefaultRequestHeaders.Add("DNT", "1");
+            client.DefaultRequestHeaders.Add("Connection", "keep-alive");
+            client.DefaultRequestHeaders.Add("Upgrade-Insecure-Requests", "1");
+            
+            return client;
+        }
+
+        private bool IsInstallationComplete(string path)
+        {
+            try
+            {
+                if (!Directory.Exists(path))
+                    return false;
+                
+                // Verificar si hay archivos clave de Atlas
+                string[] keyFiles = {
+                    "version.txt",
+                    ".atlas_version.json",
+                    "Atlas.exe",
+                    "Atlas_Interactivo.exe",
+                    "AtlasInteractivo.exe",
+                    "app.exe",
+                    "main.exe"
+                };
+                
+                foreach (string file in keyFiles)
+                {
+                    if (File.Exists(Path.Combine(path, file)))
+                    {
+                        return true;
+                    }
+                }
+                
+                // Verificar por cantidad de archivos (mínimo 5 archivos)
+                int fileCount = Directory.GetFiles(path, "*", SearchOption.AllDirectories).Length;
+                return fileCount > 5;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private async Task<bool> DownloadCompleteFile()
+        {
+            try
+            {
+                using (var client = CreateHttpClient())
+                {
+                    // Iniciar descarga
+                    using (var response = await client.GetAsync(_url, HttpCompletionOption.ResponseHeadersRead, _cancellationToken))
+                    using (var stream = await response.Content.ReadAsStreamAsync())
+                    {
+                        byte[] buffer = new byte[BUFFER_SIZE];
+                        
+                        int bytesRead;
+                        while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, _cancellationToken)) > 0)
+                        {
+                            _cancellationToken.ThrowIfCancellationRequested();
+                            
+                            // Escribir al archivo temporal
+                            await _tempFileStream.WriteAsync(buffer, 0, bytesRead, _cancellationToken);
+                            
+                            _totalBytesRead += bytesRead;
+                            
+                            // Actualizar progreso con ETA
+                            UpdateProgressWithETA();
+                        }
+                        
+                        OnLogMessage($"✅ Descarga completada: {_totalBytesRead / (1024.0 * 1024.0 * 1024.0):F2} GB");
+                        return true;
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                OnLogMessage("Descarga cancelada");
+                throw;
+            }
+            catch (Exception ex)
+            {
+                OnLogMessage($"❌ Error HTTP: {ex.Message}");
+                return false;
+            }
+        }
+
+        private void UpdateProgressWithETA()
+        {
+            try
+            {
+                if (_progress != null && _totalBytesToRead > 0)
+                {
+                    int percentage = (int)((_totalBytesRead * 100) / _totalBytesToRead);
+                    _progress.Report(Math.Min(100, Math.Max(0, percentage)));
+                    
+                    // Calcular tiempo transcurrido
+                    TimeSpan elapsed = DateTime.Now - _startTime;
+                    
+                    // Calcular velocidad en MB/s
+                    double downloadedMB = _totalBytesRead / (1024.0 * 1024.0);
+                    double speedMBps = 0;
+                    if (elapsed.TotalSeconds > 0)
+                    {
+                        speedMBps = downloadedMB / elapsed.TotalSeconds;
+                    }
+                    
+                    // Calcular ETA
+                    string etaText = "";
+                    if (speedMBps > 0.1 && _totalBytesRead < _totalBytesToRead)
+                    {
+                        double remainingMB = (_totalBytesToRead - _totalBytesRead) / (1024.0 * 1024.0);
+                        int etaSeconds = (int)(remainingMB / speedMBps);
+                        etaText = FormatETA(etaSeconds);
+                    }
+                    
+                    // Actualizar estado cada 1 segundo
+                    long currentTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                    if (currentTime - _lastReportTime > 1000)
+                    {
+                        double downloadedGB = _totalBytesRead / (1024.0 * 1024.0 * 1024.0);
+                        double totalGB = _totalBytesToRead / (1024.0 * 1024.0 * 1024.0);
+                        
+                        string status = $"Descarga: {downloadedGB:F2}/{totalGB:F2} GB ({percentage}%) - {speedMBps:F1} MB/s - ETA: {etaText}";
+                        OnStatusUpdate(status);
+                        
+                        // Log cada 10%
+                        if (percentage % 10 == 0 && currentTime - _lastReportTime > 5000)
+                        {
+                            OnLogMessage($"📥 {percentage}% - {downloadedGB:F2}/{totalGB:F2} GB - Vel: {speedMBps:F1} MB/s - ETA: {etaText}");
+                        }
+                        
+                        _lastReportTime = currentTime;
+                    }
+                }
+            }
+            catch
+            {
+                // Ignorar errores en actualización de UI
+            }
+        }
+
+        private string FormatETA(int totalSeconds)
+        {
+            if (totalSeconds <= 0) return "0s";
+            
+            if (totalSeconds < 60)
+                return $"{totalSeconds}s";
+            
+            if (totalSeconds < 3600)
+            {
+                int minutesValue = totalSeconds / 60;
+                int seconds = totalSeconds % 60;
+                return $"{minutesValue}m {seconds}s";
+            }
+            
+            int hours = totalSeconds / 3600;
+            int remainingSeconds = totalSeconds % 3600;
+            int minutesRemaining = remainingSeconds / 60;
+            return $"{hours}h {minutesRemaining}m";
+        }
+
+        private int CountExtractedFiles(string path)
+        {
+            try
+            {
+                if (!Directory.Exists(path))
+                    return 0;
+                
+                return Directory.GetFiles(path, "*", SearchOption.AllDirectories).Length;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        // private void Cleanup()
+        // {
+        //     try
+        //     {
+        //         _tempFileStream?.Dispose();
+                
+        //         if (File.Exists(_tempTarPath))
+        //         {
+        //             File.Delete(_tempTarPath);
+        //             OnLogMessage("🗑️ Archivo temporal eliminado");
+        //         }
+        //     }
+        //     catch { }
+        // }
+
+        private void Cleanup()
+        {
+            try
+            {
+                // 1. Cerrar y liberar el stream
+                if (_tempFileStream != null)
+                {
+                    try
+                    {
+                        _tempFileStream.Close();
+                        _tempFileStream.Dispose();
+                    }
+                    catch { }
+                    _tempFileStream = null;
+                }
+                
+                // 2. Esperar un poco para que el sistema operativo libere el archivo
+                Thread.Sleep(500);
+                
+                // 3. Intentar eliminar el archivo temporal
+                if (!string.IsNullOrEmpty(_tempTarPath) && File.Exists(_tempTarPath))
+                {
+                    try
+                    {
+                        // Primero intentar eliminar normalmente
+                        File.Delete(_tempTarPath);
+                        OnLogMessage("🗑️ Archivo temporal eliminado");
+                    }
+                    catch (IOException)
+                    {
+                        OnLogMessage("⚠️ Archivo temporal aún bloqueado, intentando forzar...");
+                        
+                        // Esperar un poco más
+                        Thread.Sleep(1000);
+                        
+                        try
+                        {
+                            File.Delete(_tempTarPath);
+                            OnLogMessage("🗑️ Archivo temporal eliminado después de espera");
+                        }
+                        catch
+                        {
+                            OnLogMessage("⚠️ No se pudo eliminar archivo temporal, se limpiará al reiniciar");
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public void Dispose()
+        {
+            if (!_isDisposed)
+            {
+                _isDisposed = true;
+                Cleanup();
+                GC.SuppressFinalize(this);
+            }
+        }
+    }
+
+    // ========== EXTENSIÓN PARA TRUNCAR STRINGS ==========
+    public static class StringExtensions
+    {
+        public static string Truncate(this string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            return value.Length <= maxLength ? value : value.Substring(0, maxLength) + "...";
+        }
+    }
+
     public partial class MainForm : Form
     {
         // Colores inspirados en Qt de Linux
@@ -48,18 +1460,493 @@ namespace AtlasInstaller
         private Label lblDiskSpace;
         private Label lblSpaceWarning;
         
+        // Variables de estado mejoradas
         private bool isInstalling = false;
         private string installPath = @"C:\AtlasInteractivo";
-        private WebClient downloadClient;
-        // private System.Windows.Forms.Timer diskSpaceTimer;
+        private CancellationTokenSource cancellationTokenSource;
+        private bool isCancelling = false;
         
+        // Constantes para la instalación
+        private const long REQUIRED_SPACE_GB = 25;
+        private const int MAX_DOWNLOAD_RETRIES = 3;
+        private const int FILE_GROUP_SIZE = 1000; // Extraer en grupos de 1000 archivos
+        private const bool USE_LOCAL_SERVER = true; // Cambiar a true para pruebas locales
+        
+        // Añadir estas variables a la clase MainForm
+        private System.Windows.Forms.Timer progressTimer;
+        // private DateTime downloadStartTime;
+
+        // ID de Google Drive para TAR
+        private const string GOOGLE_DRIVE_ID = "1GkLbE4OYVwTdTpGRxi3p7w2McIRaggU1"; // Cambiar por ID del TAR
+
         public MainForm()
         {
             InitializeComponent();
             SetupUI();
-            UpdateDiskSpace(); // Solo una vez al inicio
+            UpdateDiskSpace();
+
+            // Timer simplificado
+            progressTimer = new System.Windows.Forms.Timer();
+            progressTimer.Interval = 1000;
+            progressTimer.Tick += (s, e) => {
+                if (isInstalling) UpdateDiskSpace();
+            };
+
+            progressTimer.Start();
         }
-        
+
+
+
+
+        // ========== MÉTODOS SIMPLIFICADOS PARA GOOGLE DRIVE ==========
+
+        private async Task<string> GetDirectGoogleDriveUrl(string driveId)
+        {
+            try
+            {
+                LogMessage("🌐 Obteniendo enlace directo de Google Drive...", COLOR_PRIMARY);
+                
+                // Método 1: Intentar con la URL directa con confirm=t
+                string directUrl = $"https://drive.google.com/uc?id={driveId}&export=download&confirm=t";
+                
+                // Método 2: URL alternativa usando drive.usercontent.google.com
+                string alternativeUrl = $"https://drive.usercontent.google.com/download?id={driveId}&export=download&confirm=t";
+                
+                // Probar ambas URLs
+                return await TestUrl(directUrl) ? directUrl : alternativeUrl;
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"⚠️ Error obteniendo URL: {ex.Message}", COLOR_WARNING);
+                // Fallback
+                return $"https://drive.google.com/uc?id={driveId}&export=download&confirm=t";
+            }
+        }
+
+        private async Task<bool> TestUrl(string url)
+        {
+            try
+            {
+                using (var client = new HttpClient())
+                {
+                    client.Timeout = TimeSpan.FromSeconds(10);
+                    var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                    return response.IsSuccessStatusCode;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private async Task<bool> DownloadGoogleDriveWithTarMethod(string driveId, string extractPath, CancellationToken cancellationToken)
+        {
+            try
+            {
+                // Obtener URL directa
+                string downloadUrl = await GetDirectGoogleDriveUrl(driveId);
+                LogMessage($"🔗 URL de descarga TAR: {downloadUrl}", COLOR_PRIMARY);
+                
+                // INICIAR PROGRESO DESDE 10%
+                UpdateStatus("Obteniendo información del servidor...", 10);
+                
+                // **USAR LA NUEVA CLASE BufferedTarDownloader**
+                using (var downloader = new BufferedTarDownloader(
+                    downloadUrl, 
+                    extractPath, 
+                    new Progress<int>(p => {
+                        // Ajustar progreso: 10-60% para descarga, 60-100% para extracción
+                        int progress = 10 + (int)(p * 0.9); // 10% a 100%
+                        UpdateProgress(Math.Min(100, Math.Max(10, progress)));
+                    }), 
+                    cancellationToken))
+                {
+                    downloader.LogMessage += (sender, msg) => LogMessage(msg);
+                    downloader.StatusUpdate += (sender, status) => UpdateStatus(status, progressBar.Value);
+                    
+                    LogMessage("🚀 Iniciando descarga con BufferedTarDownloader...", COLOR_PRIMARY);
+                    UpdateStatus("Iniciando descarga y extracción TAR...", 15);
+                    
+                    return await downloader.DownloadAndExtractIncremental();
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"❌ Error descargando TAR: {ex.Message}", COLOR_ERROR);
+                return false;
+            }
+        }
+
+
+        private string Get7ZipPath()
+        {
+            try
+            {
+                // Rutas absolutas primero
+                string[] possiblePaths = {
+                    @"C:\Program Files\7-Zip\7z.exe",
+                    @"C:\Program Files (x86)\7-Zip\7z.exe"
+                };
+                
+                foreach (string path in possiblePaths)
+                {
+                    if (File.Exists(path))
+                    {
+                        LogMessage($"✅ 7-zip encontrado en: {path}");
+                        return path;
+                    }
+                }
+                
+                // Si no está en rutas absolutas, devolver la ruta por defecto
+                LogMessage("⚠️ Usando ruta por defecto de 7-zip");
+                return @"C:\Program Files\7-Zip\7z.exe";
+            }
+            catch
+            {
+                return @"C:\Program Files\7-Zip\7z.exe";
+            }
+        }
+
+
+
+        // NUEVO MÉTODO: Verificar si ya está instalado
+        private bool IsAlreadyInstalled(string path)
+        {
+            try
+            {
+                if (!Directory.Exists(path))
+                    return false;
+                
+                // Verificar archivos clave
+                string[] requiredFiles = {
+                    ".atlas_version.json",
+                    "version.txt",
+                    "Atlas.exe",
+                    "README.md",
+                    "LICENSE"
+                };
+                
+                int foundCount = 0;
+                foreach (string file in requiredFiles)
+                {
+                    if (File.Exists(Path.Combine(path, file)))
+                    {
+                        foundCount++;
+                    }
+                }
+                
+                // Si encontramos al menos 2 archivos clave, consideramos instalado
+                return foundCount >= 2;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+
+
+
+
+        private async Task<bool> Install7ZipSimple()
+        {
+            try
+            {
+                LogMessage("📦 Instalando 7-zip...", COLOR_PRIMARY);
+                
+                // 1. Verificar si ya está instalado
+                if (Is7ZipInstalled())
+                {
+                    LogMessage("✅ 7-zip ya está instalado", COLOR_SUCCESS);
+                    return true;
+                }
+                
+                // 2. Buscar instalador en Descargas
+                string downloadsPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + @"\Downloads";
+                string installerPath = FindLatest7ZipInstaller(downloadsPath);
+                
+                bool userInstalledManually = false;
+                
+                if (string.IsNullOrEmpty(installerPath))
+                {
+                    // Abrir página de descarga
+                    Process.Start("https://www.7-zip.org/download.html");
+                    
+                    LogMessage("⚠️ 7-zip no encontrado. Por favor:", COLOR_WARNING);
+                    LogMessage("1. Descargue 7-zip desde el navegador", COLOR_WARNING);
+                    LogMessage("2. Guárdelo en 'Descargas'", COLOR_WARNING);
+                    LogMessage("3. Ejecútelo y complete la instalación", COLOR_WARNING);
+                    LogMessage("4. Haga clic en Aceptar en esta ventana", COLOR_WARNING);
+                    
+                    // MOSTRAR MessageBox y ESPERAR A QUE EL USUARIO LO CIERRE
+                    var dialogResult = MessageBox.Show(
+                        "7-zip no encontrado.\n\n" +
+                        "Por favor:\n" +
+                        "1. Descargue 7-zip desde el navegador que se abrirá\n" +
+                        "2. Guárdelo en 'Descargas'\n" +
+                        "3. Ejecútelo y complete la instalación\n" +
+                        "4. Haga clic en Aceptar para continuar\n\n" +
+                        "¿Ya instaló 7-zip?",
+                        "7-zip requerido",
+                        MessageBoxButtons.OKCancel,
+                        MessageBoxIcon.Information);
+                    
+                    if (dialogResult == DialogResult.Cancel)
+                    {
+                        LogMessage("❌ Usuario canceló la instalación de 7-zip", COLOR_ERROR);
+                        return false;
+                    }
+                    
+                    userInstalledManually = true;
+                    
+                    // Buscar nuevamente después de que el usuario cierre el MessageBox
+                    installerPath = FindLatest7ZipInstaller(downloadsPath);
+                    
+                    if (string.IsNullOrEmpty(installerPath))
+                    {
+                        // Esperar un poco más y buscar de nuevo
+                        for (int i = 0; i < 3; i++)
+                        {
+                            LogMessage($"Esperando para buscar 7-zip... ({i + 1}/3)", COLOR_WARNING);
+                            await Task.Delay(5000); // Esperar 5 segundos
+                            installerPath = FindLatest7ZipInstaller(downloadsPath);
+                            if (!string.IsNullOrEmpty(installerPath))
+                                break;
+                        }
+                        
+                        if (string.IsNullOrEmpty(installerPath))
+                        {
+                            // Dar otra oportunidad al usuario
+                            var result = MessageBox.Show(
+                                "No se encontró el instalador de 7-zip en Descargas.\n\n" +
+                                "¿Ya descargó e instaló 7-zip?",
+                                "Verificar 7-zip",
+                                MessageBoxButtons.YesNo,
+                                MessageBoxIcon.Question);
+                            
+                            if (result == DialogResult.No)
+                            {
+                                throw new Exception("No se encontró el instalador de 7-zip en Descargas");
+                            }
+                        }
+                    }
+                }
+                
+                // Si encontramos el instalador, ejecutarlo
+                if (!string.IsNullOrEmpty(installerPath))
+                {
+                    LogMessage($"🔧 Ejecutando {Path.GetFileName(installerPath)}...", COLOR_PRIMARY);
+                    
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = installerPath,
+                        UseShellExecute = true,
+                        Verb = "runas" // Ejecutar como administrador si es necesario
+                    });
+                    
+                    MessageBox.Show(
+                        "Complete la instalación de 7-zip y luego haga clic en Aceptar en esta ventana.",
+                        "Complete la instalación",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                else if (userInstalledManually)
+                {
+                    // El usuario dijo que ya instaló manualmente
+                    LogMessage("⚠️ Asumiendo que el usuario instaló 7-zip manualmente...", COLOR_WARNING);
+                }
+                
+                // 4. Esperar y verificar
+                await Task.Delay(8000); // Esperar 8 segundos para que termine la instalación
+                
+                // Verificar múltiples veces
+                bool isInstalled = false;
+                for (int attempt = 0; attempt < 5; attempt++)
+                {
+                    if (Is7ZipInstalled())
+                    {
+                        isInstalled = true;
+                        break;
+                    }
+                    await Task.Delay(2000); // Esperar 2 segundos entre intentos
+                }
+                
+                if (!isInstalled)
+                {
+                    // Última verificación
+                    await Task.Delay(3000);
+                    isInstalled = Is7ZipInstalled();
+                }
+                
+                if (isInstalled)
+                {
+                    LogMessage("✅ 7-zip instalado correctamente", COLOR_SUCCESS);
+                    return true;
+                }
+                else
+                {
+                    throw new Exception("No se pudo verificar la instalación de 7-zip. Por favor, instálelo manualmente.");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"❌ Error instalando 7-zip: {ex.Message}", COLOR_ERROR);
+                return false;
+            }
+        }
+
+
+        private bool Is7ZipInstalled()
+        {
+            try
+            {
+                // Verificar rutas comunes de 7-zip
+                string[] possiblePaths = {
+                    @"C:\Program Files\7-Zip\7z.exe",
+                    @"C:\Program Files (x86)\7-Zip\7z.exe",
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "7-Zip", "7z.exe"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "7-Zip", "7z.exe")
+                };
+                
+                foreach (string path in possiblePaths)
+                {
+                    if (File.Exists(path))
+                    {
+                        LogMessage($"✅ 7-zip encontrado en: {path}", COLOR_SUCCESS);
+                        return true;
+                    }
+                }
+                
+                // También verificar en PATH
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo
+                    {
+                        FileName = "where",
+                        Arguments = "7z",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        CreateNoWindow = true
+                    };
+                    
+                    using (Process process = new Process())
+                    {
+                        process.StartInfo = psi;
+                        process.Start();
+                        string output = process.StandardOutput.ReadToEnd();
+                        process.WaitForExit();
+                        
+                        if (!string.IsNullOrWhiteSpace(output) && output.Contains("7z.exe"))
+                        {
+                            LogMessage($"✅ 7-zip encontrado en PATH: {output.Trim()}", COLOR_SUCCESS);
+                            return true;
+                        }
+                    }
+                }
+                catch { }
+                
+                LogMessage("⚠️ 7-zip no encontrado en ninguna ruta conocida", COLOR_WARNING);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"⚠️ Error verificando 7-zip: {ex.Message}", COLOR_WARNING);
+                return false;
+            }
+        }
+
+        private string FindLatest7ZipInstaller(string downloadsPath)
+        {
+            try
+            {
+                if (!Directory.Exists(downloadsPath)) return null;
+                
+                // Buscar archivos que parezcan instaladores de 7-zip
+                string[] files = Directory.GetFiles(downloadsPath, "7z*.exe")
+                    .Concat(Directory.GetFiles(downloadsPath, "7-zip*.exe"))
+                    .ToArray();
+                
+                // Filtrar por tamaño (1-10 MB) y tomar el más reciente
+                var validFiles = files
+                    .Where(f => 
+                    {
+                        try
+                        {
+                            var info = new FileInfo(f);
+                            return info.Length > 1000000 && info.Length < 20000000;
+                        }
+                        catch { return false; }
+                    })
+                    .OrderByDescending(f => new FileInfo(f).LastWriteTime)
+                    .ToList();
+                
+                return validFiles.FirstOrDefault();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+
+        private async Task<bool> DownloadWithTarMethod(string url, string extractPath, CancellationToken cancellationToken)
+        {
+            try
+            {
+                LogMessage("🚀 Iniciando descarga TAR...", COLOR_PRIMARY);
+                
+                using (var downloader = new BufferedTarDownloader(url, extractPath, 
+                    new Progress<int>(p => UpdateProgress(10 + (int)(p * 0.5))), cancellationToken))
+                {
+                    downloader.LogMessage += (sender, msg) => LogMessage(msg);
+                    downloader.StatusUpdate += (sender, status) => UpdateStatus(status, progressBar.Value);
+                    
+                    return await downloader.DownloadAndExtractIncremental();
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"❌ Error en descarga TAR: {ex.Message}", COLOR_ERROR);
+                return false;
+            }
+        }
+
+        private void CreateVersionFile()
+        {
+            try
+            {
+                string versionFile = Path.Combine(installPath, ".atlas_version.json");
+                
+                string json = $@"{{
+            ""version"": ""1.0.0"",
+            ""installed"": true,
+            ""install_path"": ""{installPath.Replace("\\", "\\\\")}"",
+            ""install_date"": ""{DateTime.Now:yyyy-MM-ddTHH:mm:ss}"",
+            ""file_type"": ""tar"",
+            ""download_size"": ""variable"",
+            ""download_resumable"": true,
+            ""download_attempts"": 1,
+            ""extraction_method"": ""tar_exe_incremental"",
+            ""extraction_groups"": 50000,
+            ""extraction_tool"": ""tar.exe"",
+            ""platform"": ""windows"",
+            ""installer_version"": ""3.0.0"",
+            ""requires_tar"": true
+        }}";
+                
+                File.WriteAllText(versionFile, json, Encoding.UTF8);
+                LogMessage("✅ Archivo de versión creado", COLOR_SUCCESS);
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"⚠️ No se pudo crear archivo de versión: {ex.Message}", COLOR_WARNING);
+            }
+        }
+
+
+
+
 
         private void InitializeComponent()
         {
@@ -80,8 +1967,8 @@ namespace AtlasInstaller
             mainLayout.ColumnCount = 1;
             mainLayout.RowCount = 5;
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 80));   // Header
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 260));  // Config (AUMENTADO de 220 a 260)
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 60));    // Progress
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 270));  // Config (AUMENTADO de 220 a 260)
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 80));    // Progress
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));   // Botones
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));   // Footer
             mainLayout.Padding = new Padding(0, 0, 0, 5);
@@ -267,7 +2154,8 @@ namespace AtlasInstaller
             infoContent.Text = "• Descarga desde Google Drive (~20 GB)\r\n" +
                             "• Se requieren 25 GB de espacio disponible\r\n" +
                             "• Archivo temporal se elimina automáticamente\r\n" +
-                            "• Descarga resumible con 3 reintentos";
+                            "• Descarga resumible con 3 reintentos\r\n" +
+                            "• Requiere 7-zip (se instala automáticamente)";
             infoContent.Font = new Font("Segoe UI", 9F); // Fuente un poco más grande
             infoContent.ForeColor = Color.FromArgb(52, 73, 94);
             infoContent.BackColor = COLOR_INFO_BG;
@@ -322,15 +2210,18 @@ namespace AtlasInstaller
             statusPanel.Controls.AddRange(new Control[] { lblStatusTitle, lblStatus });
             progressLayout.Controls.Add(statusPanel, 0, 0);
             
-            // Fila 2: Barra de progreso
+            // Fila 2: Barra de progreso MEJORADA
             progressBar = new ProgressBar();
             progressBar.Dock = DockStyle.Fill;
             progressBar.Value = 0;
             progressBar.Style = ProgressBarStyle.Continuous;
             progressBar.ForeColor = COLOR_PRIMARY;
-            progressBar.Height = 20;
-            progressLayout.Controls.Add(progressBar, 0, 1);
-            
+            progressBar.Height = 25;
+            progressBar.Step = 1;
+
+            // Configurar para mostrar porcentaje (solo en Windows Forms nativo)
+            // Nota: En algunos sistemas, puede necesitarse custom drawing
+            progressLayout.Controls.Add(progressBar, 0, 1);            
 
 
             // Fila 3: Área de log (estilo Qt oscuro)
@@ -411,7 +2302,7 @@ namespace AtlasInstaller
             
             // Botón "Salir"
             btnExit = new Button();
-            btnExit.Text = "Salir";
+            btnExit.Text = "CANCELAR";
             btnExit.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             btnExit.BackColor = COLOR_ERROR;
             btnExit.ForeColor = Color.White;
@@ -450,7 +2341,7 @@ namespace AtlasInstaller
             
             lblFooter = new Label();
             lblFooter.Dock = DockStyle.Fill;
-            lblFooter.Text = "⚠️ Requiere conexión a Internet • Descarga resumible • 3 reintentos • Espacio temporal: 25 GB";
+            lblFooter.Text = "⚠️ Requiere conexión a Internet • Descarga resumible • 3 reintentos • Requiere 7-zip • Espacio temporal: 25 GB";
             lblFooter.Font = new Font("Segoe UI", 8.5F, FontStyle.Bold);
             lblFooter.ForeColor = Color.FromArgb(236, 240, 241);
             lblFooter.TextAlign = ContentAlignment.MiddleCenter;
@@ -468,52 +2359,6 @@ namespace AtlasInstaller
             this.FormClosing += MainForm_FormClosing;
             this.Resize += MainForm_Resize;
         }  
-        
-
-
-        private void MainForm_Resize(object sender, EventArgs e)
-        {
-            // Asegurar que el texto de espacio no se corte
-            int availableWidth = this.Width - 200;
-            
-            if (availableWidth < 500)
-            {
-                lblDiskSpace.Size = new Size(200, 20);
-                lblSpaceWarning.Size = new Size(180, 20);
-            }
-            else if (availableWidth < 700)
-            {
-                lblDiskSpace.Size = new Size(300, 20);
-                lblSpaceWarning.Size = new Size(250, 20);
-            }
-            else
-            {
-                lblDiskSpace.Size = new Size(400, 20);
-                lblSpaceWarning.Size = new Size(300, 20);
-            }
-            
-            // Ajustar el tamaño del texto del footer
-            if (this.Width < 700)
-            {
-                lblFooter.Font = new Font("Segoe UI", 7F, FontStyle.Bold);
-                lblFooter.Text = "⚠️ Internet • Resumible • 25 GB";
-            }
-            else if (this.Width < 850)
-            {
-                lblFooter.Font = new Font("Segoe UI", 7.5F, FontStyle.Bold);
-                lblFooter.Text = "⚠️ Conexión Internet • Descarga resumible • 25 GB";
-            }
-            else
-            {
-                lblFooter.Font = new Font("Segoe UI", 8.5F, FontStyle.Bold);
-                lblFooter.Text = "⚠️ Requiere conexión a Internet • Descarga resumible • 3 reintentos • Espacio temporal: 25 GB";
-            }
-            
-            // Forzar redibujado para ajustar controles
-            this.PerformLayout();
-        }
-
-
 
         private void SetupUI()
         {
@@ -537,24 +2382,20 @@ namespace AtlasInstaller
             toolTip.SetToolTip(btnBrowse, "Seleccionar carpeta de instalación");
             toolTip.SetToolTip(btnClearLog, "Limpiar el registro de instalación");
             toolTip.SetToolTip(btnAbout, "Acerca del instalador");
-            toolTip.SetToolTip(btnExit, "Salir del instalador");
+            toolTip.SetToolTip(btnExit, "Cancelar instalación y salir");
             toolTip.SetToolTip(btnInstall, "Iniciar instalación de Atlas Interactivo");
             toolTip.SetToolTip(txtDirectory, "Ruta donde se instalará el programa");
             toolTip.SetToolTip(chkDesktop, "Crear acceso directo en el escritorio");
             toolTip.SetToolTip(chkMenu, "Añadir al menú de aplicaciones");
         }
 
-
-
         private void UpdateDiskSpace()
         {
             try
             {
-                if (string.IsNullOrEmpty(installPath) || isInstalling)
+                if (string.IsNullOrEmpty(installPath))
                     return;
                     
-                const long REQUIRED_SPACE_GB = 25;
-                
                 string drivePath = Path.GetPathRoot(installPath);
                 if (string.IsNullOrEmpty(drivePath))
                     drivePath = "C:\\";
@@ -566,69 +2407,73 @@ namespace AtlasInstaller
                     double availableGB = drive.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0);
                     long requiredBytes = REQUIRED_SPACE_GB * 1024L * 1024L * 1024L;
                     
-                    if (drive.AvailableFreeSpace >= requiredBytes)
+                    // Usar Invoke para actualizar UI desde hilos secundarios
+                    if (this.InvokeRequired)
                     {
-                        // Suficiente espacio - LETRERO VERDE VISIBLE
-                        lblDiskSpace.Text = $"Espacio disponible en {drive.Name}: {availableGB:F2} GB";
-                        lblDiskSpace.ForeColor = COLOR_SUCCESS;
-                        lblDiskSpace.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-                        
-                        lblSpaceWarning.Text = "✅ ESPACIO SUFICIENTE";
-                        lblSpaceWarning.ForeColor = COLOR_SUCCESS;
-                        lblSpaceWarning.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-                        
-                        // LOG EN COLOR VERDE usando AppendText con color
-                        string logMessage = $"[{DateTime.Now:HH:mm:ss}] ✅ Espacio suficiente: {availableGB:F2} GB disponibles";
-                        AppendColoredLogMessage(logMessage, COLOR_SUCCESS);
-                        
-                        btnInstall.Enabled = true;
+                        this.Invoke(new Action(() => {
+                            lblDiskSpace.Text = $"💾 Espacio en {drive.Name}: {availableGB:F2} GB";
+                            
+                            if (drive.AvailableFreeSpace >= requiredBytes)
+                            {
+                                lblDiskSpace.ForeColor = COLOR_SUCCESS;
+                                lblSpaceWarning.Text = "✅ SUFICIENTE";
+                                lblSpaceWarning.ForeColor = COLOR_SUCCESS;
+                            }
+                            else
+                            {
+                                lblDiskSpace.ForeColor = COLOR_ERROR;
+                                lblSpaceWarning.Text = $"❌ REQUIERE {REQUIRED_SPACE_GB} GB";
+                                lblSpaceWarning.ForeColor = COLOR_ERROR;
+                            }
+                        }));
                     }
                     else
                     {
-                        // Espacio insuficiente - LETRERO ROJO VISIBLE
-                        lblDiskSpace.Text = $"Espacio disponible en {drive.Name}: {availableGB:F2} GB";
-                        lblDiskSpace.ForeColor = COLOR_ERROR;
-                        lblDiskSpace.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+                        lblDiskSpace.Text = $"💾 Espacio en {drive.Name}: {availableGB:F2} GB";
                         
-                        lblSpaceWarning.Text = $"❌ REQUIERE {REQUIRED_SPACE_GB} GB";
-                        lblSpaceWarning.ForeColor = COLOR_ERROR;
-                        lblSpaceWarning.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-                        
-                        // LOG EN COLOR ROJO
-                        string logMessage = $"[{DateTime.Now:HH:mm:ss}] ❌ Espacio insuficiente: {availableGB:F2} GB disponibles, se requieren {REQUIRED_SPACE_GB} GB";
-                        AppendColoredLogMessage(logMessage, COLOR_ERROR);
-                        
-                        btnInstall.Enabled = false;
+                        if (drive.AvailableFreeSpace >= requiredBytes)
+                        {
+                            lblDiskSpace.ForeColor = COLOR_SUCCESS;
+                            lblSpaceWarning.Text = "✅ SUFICIENTE";
+                            lblSpaceWarning.ForeColor = COLOR_SUCCESS;
+                            
+                            // Log solo durante instalación
+                            if (isInstalling)
+                            {
+                                // Log cada cambio significativo (cada 0.5 GB)
+                                if (availableGB % 0.5 < 0.1)
+                                {
+                                    LogMessage($"💾 Espacio disponible: {availableGB:F2} GB", COLOR_SUCCESS);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            lblDiskSpace.ForeColor = COLOR_ERROR;
+                            lblSpaceWarning.Text = $"❌ REQUIERE {REQUIRED_SPACE_GB} GB";
+                            lblSpaceWarning.ForeColor = COLOR_ERROR;
+                            
+                            // SIEMPRE mostrar advertencia si hay poco espacio durante instalación
+                            if (isInstalling)
+                            {
+                                LogMessage($"⚠️ Espacio bajo: {availableGB:F2} GB", COLOR_WARNING);
+                            }
+                        }
                     }
-                }
-                else
-                {
-                    lblDiskSpace.Text = "No se puede acceder a la unidad";
-                    lblDiskSpace.ForeColor = Color.Gray;
-                    lblDiskSpace.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
                     
-                    lblSpaceWarning.Text = "⚠️ VERIFICACIÓN FALLIDA";
-                    lblSpaceWarning.ForeColor = COLOR_WARNING;
-                    lblSpaceWarning.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-                    
-                    AppendColoredLogMessage($"[{DateTime.Now:HH:mm:ss}] ⚠️ No se puede verificar el espacio en disco", COLOR_WARNING);
+                    // Forzar actualización de UI
+                    Application.DoEvents();
                 }
             }
             catch (Exception ex)
             {
-                lblDiskSpace.Text = "No se pudo verificar el espacio";
-                lblDiskSpace.ForeColor = Color.Gray;
-                lblDiskSpace.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-                
-                lblSpaceWarning.Text = "⚠️ ERROR DE VERIFICACIÓN";
-                lblSpaceWarning.ForeColor = COLOR_WARNING;
-                lblSpaceWarning.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
-                
-                btnInstall.Enabled = true; // Permitir instalación si no se puede verificar
-                AppendColoredLogMessage($"[{DateTime.Now:HH:mm:ss}] ⚠️ Error verificando espacio: {ex.Message}", COLOR_WARNING);
+                // Mostrar error solo si estamos instalando
+                if (isInstalling)
+                {
+                    LogMessage($"⚠️ Error verificando espacio: {ex.Message}", COLOR_WARNING);
+                }
             }
         }
-
 
         private void AppendColoredLogMessage(string message, Color color)
         {
@@ -654,8 +2499,6 @@ namespace AtlasInstaller
             // Desplazar al final
             txtLog.ScrollToCaret();
         }
-        
-        // ========== EVENT HANDLERS ==========
 
         private void BtnBrowse_Click(object sender, EventArgs e)
         {
@@ -706,6 +2549,7 @@ namespace AtlasInstaller
             }
         }
 
+
         private void BtnClearLog_Click(object sender, EventArgs e)
         {
             if (isInstalling)
@@ -731,6 +2575,7 @@ namespace AtlasInstaller
             }
         }
 
+
         private void BtnAbout_Click(object sender, EventArgs e)
         {
             MessageBox.Show(
@@ -747,109 +2592,12 @@ namespace AtlasInstaller
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
         }
-        
-        private void BtnExit_Click(object sender, EventArgs e)
-        {
-            if (isInstalling)
-            {
-                var result = MessageBox.Show(
-                    "La instalación está en progreso. ¿Estás seguro de que deseas salir?",
-                    "Confirmar salida",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning);
-                
-                if (result == DialogResult.Yes)
-                {
-                    if (downloadClient != null && downloadClient.IsBusy)
-                    {
-                        downloadClient.CancelAsync();
-                    }
-                    Application.Exit();
-                }
-            }
-            else
-            {
-                Application.Exit();
-            }
-        }
-        
 
 
-        private async void BtnInstall_Click(object sender, EventArgs e)
-        {
-            if (isInstalling) return;
-            
-            // Validar ruta
-            if (string.IsNullOrWhiteSpace(txtDirectory.Text))
-            {
-                MessageBox.Show("Por favor, selecciona una ubicación para la instalación.",
-                    "Ubicación requerida", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-            
-            // Verificar espacio en disco
-            if (!CheckDiskSpace(installPath, 25))
-            {
-                MessageBox.Show(
-                    "Se requieren al menos 25 GB de espacio libre en la unidad.\n\n" +
-                    $"Espacio disponible: {GetAvailableSpaceGB(installPath):F2} GB\n" +
-                    "Espacio requerido: 25 GB",
-                    "Espacio insuficiente",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-                return;
-            }
-            
-            // Verificar si el directorio está vacío
-            if (Directory.Exists(installPath) && !IsDirectoryEmpty(installPath))
-            {
-                var result = MessageBox.Show(
-                    $"El directorio '{installPath}' no está vacío.\n\n" +
-                    "¿Deseas continuar? Los archivos existentes podrían ser sobrescritos.",
-                    "Directorio no vacío",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning);
-                
-                if (result != DialogResult.Yes) return;
-            }
-            
-            // Confirmar instalación
-            var confirmResult = MessageBox.Show(
-                "MÉTODO OPTIMIZADO ACTIVADO\n\n" +
-                "✓ Descarga resumible con 3 reintentos\n" +
-                "✓ Extracción automática\n" +
-                "✓ Espacio temporal máximo: 25 GB\n\n" +
-                "¿Desea continuar con la instalación?",
-                "Confirmar instalación",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Information);
-            
-            if (confirmResult != DialogResult.Yes) return;
-            
-            isInstalling = true;
-            
-            btnInstall.Enabled = false;
-            btnBrowse.Enabled = false;
-            btnExit.Enabled = false;
-            btnAbout.Enabled = false;
-            btnInstall.Text = "Instalando...";
-            
-            txtLog.AppendText($"[{DateTime.Now:HH:mm:ss}] Iniciando instalación...\n");
-            txtLog.AppendText($"[{DateTime.Now:HH:mm:ss}] Descarga resumible activada\n");
-            txtLog.AppendText($"[{DateTime.Now:HH:mm:ss}] Espacio temporal máximo: 25 GB\n");
-            
-            // Ejecutar instalación en segundo plano
-            await Task.Run(() => InstallAtlas());
-            
-            btnInstall.Enabled = true;
-            btnBrowse.Enabled = true;
-            btnExit.Enabled = true;
-            btnAbout.Enabled = true;
-            btnInstall.Text = "INICIAR INSTALACIÓN";
-            
-            // Actualizar espacio después de instalación (UNA SOLA VEZ)
-            UpdateDiskSpace();
-        }
+
+
+
+
 
 
         private void MainForm_Load(object sender, EventArgs e)
@@ -867,294 +2615,67 @@ namespace AtlasInstaller
             this.Focus();
         }
 
-
-        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        private void MainForm_Resize(object sender, EventArgs e)
         {
-            if (isInstalling)
+            // Asegurar que el texto de espacio no se corte
+            int availableWidth = this.Width - 200;
+            
+            if (availableWidth < 500)
             {
-                var result = MessageBox.Show(
-                    "La instalación está en progreso. ¿Estás seguro de que deseas salir?",
-                    "Confirmar salida",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning);
-                
-                if (result != DialogResult.Yes)
-                {
-                    e.Cancel = true;
-                }
-                else if (downloadClient != null && downloadClient.IsBusy)
-                {
-                    downloadClient.CancelAsync();
-                }
+                lblDiskSpace.Size = new Size(200, 20);
+                lblSpaceWarning.Size = new Size(180, 20);
+            }
+            else if (availableWidth < 700)
+            {
+                lblDiskSpace.Size = new Size(300, 20);
+                lblSpaceWarning.Size = new Size(250, 20);
+            }
+            else
+            {
+                lblDiskSpace.Size = new Size(400, 20);
+                lblSpaceWarning.Size = new Size(300, 20);
             }
             
-            // NO HAY TIMER QUE LIMPIAR
-        }
-
-        // ========== LÓGICA DE INSTALACIÓN ==========
-        
-        private void InstallAtlas()
-        {
-            string tempFile = null;
+            // Ajustar el tamaño del texto del footer
+            if (this.Width < 700)
+            {
+                lblFooter.Font = new Font("Segoe UI", 7F, FontStyle.Bold);
+                lblFooter.Text = "⚠️ Internet • Resumible • 25 GB";
+            }
+            else if (this.Width < 850)
+            {
+                lblFooter.Font = new Font("Segoe UI", 7.5F, FontStyle.Bold);
+                lblFooter.Text = "⚠️ Conexión Internet • Descarga resumible • 25 GB";
+            }
+            else
+            {
+                lblFooter.Font = new Font("Segoe UI", 8.5F, FontStyle.Bold);
+                lblFooter.Text = "⚠️ Requiere conexión a Internet • Descarga resumible • 3 reintentos • Espacio temporal: 25 GB";
+            }
             
-            try
-            {
-                // ID de Google Drive (mismo que en Qt)
-                // string driveId = "1vzAxSaKRXIPSNf937v6xjuBhRyrCiVRF";
-                string driveId = "1X-ZkC1hHNTEivXDoCOZQKgVODeWdN5LW";
+            // Forzar redibujado para ajustar controles
+            this.PerformLayout();
+        }
 
-                
-                // Actualizar UI
-                UpdateStatus("Verificando espacio en disco...", 5);
-                LogMessage("Verificando requisitos del sistema...");
-                
-                // Crear directorio si no existe
-                Directory.CreateDirectory(installPath);
-                
-                // Descarga real
-                UpdateStatus("Descargando desde Google Drive...", 10);
-                LogMessage($"Iniciando descarga desde Google Drive...");
-                
-                // Crear archivo temporal
-                tempFile = Path.Combine(Path.GetTempPath(), $"atlas_{Guid.NewGuid()}.zip");
-                
-                // URL de descarga de Google Drive
-                string downloadUrl = $"https://drive.google.com/uc?id={driveId}&export=download&confirm=t";
-                
-                LogMessage($"URL de descarga: {downloadUrl}");
-                LogMessage($"Archivo temporal: {tempFile}");
-                
-                // Descargar con WebClient
-                downloadClient = new WebClient();
-                
-                // Configurar eventos
-                downloadClient.DownloadProgressChanged += (s, e) =>
-                {
-                    int progress = 10 + (int)(e.BytesReceived * 0.4 / e.TotalBytesToReceive);
-                    UpdateProgress(progress);
-                    UpdateStatus($"Descargando: {e.BytesReceived / (1024 * 1024):N0} MB de {e.TotalBytesToReceive / (1024 * 1024):N0} MB", progress);
-                    
-                    if (e.ProgressPercentage % 10 == 0 && e.ProgressPercentage > 0)
-                    {
-                        LogMessage($"Progreso: {e.ProgressPercentage}% - Descargado: {e.BytesReceived / (1024 * 1024):N0} MB");
-                    }
-                };
-                
-                downloadClient.DownloadFileCompleted += (s, e) =>
-                {
-                    if (e.Cancelled)
-                    {
-                        LogMessage("❌ Descarga cancelada por el usuario");
-                        UpdateStatus("Descarga cancelada", 0);
-                    }
-                    else if (e.Error != null)
-                    {
-                        LogMessage($"❌ Error en la descarga: {e.Error.Message}");
-                        UpdateStatus("Error en la descarga", 0);
-                    }
-                    else
-                    {
-                        LogMessage("✅ Descarga completada");
-                        UpdateStatus("Descarga completada", 50);
-                    }
-                };
-                
-                // Iniciar descarga asíncrona
-                var downloadTask = downloadClient.DownloadFileTaskAsync(new Uri(downloadUrl), tempFile);
-                
-                // Esperar a que termine la descarga
-                downloadTask.Wait();
-                
-                if (!isInstalling)
-                {
-                    LogMessage("Instalación cancelada por el usuario");
-                    if (tempFile != null && File.Exists(tempFile)) File.Delete(tempFile);
-                    return;
-                }
-                
-                // Verificar archivo descargado
-                if (!File.Exists(tempFile) || new FileInfo(tempFile).Length == 0)
-                {
-                    throw new Exception("El archivo descargado está vacío o no existe");
-                }
-                
-                long fileSize = new FileInfo(tempFile).Length;
-                LogMessage($"✅ Descarga completada: {fileSize / (1024 * 1024):N0} MB");
-                UpdateStatus("Descarga completada", 50);
-                
-                // Extraer archivo
-                UpdateStatus("Extrayendo archivos...", 55);
-                LogMessage("Extrayendo archivo ZIP...");
-                
-                // Extraer ZIP
-                using (ZipArchive archive = ZipFile.OpenRead(tempFile))
-                {
-                    int totalEntries = archive.Entries.Count;
-                    int currentEntry = 0;
-                    
-                    LogMessage($"Total de archivos a extraer: {totalEntries}");
-                    
-                    foreach (ZipArchiveEntry entry in archive.Entries)
-                    {
-                        if (!isInstalling) break;
-                        
-                        string fullPath = Path.Combine(installPath, entry.FullName);
-                        
-                        // Crear directorio si es necesario
-                        if (entry.Name == "")
-                        {
-                            Directory.CreateDirectory(Path.GetDirectoryName(fullPath));
-                            continue;
-                        }
-                        
-                        // Extraer archivo
-                        try
-                        {
-                            entry.ExtractToFile(fullPath, true);
-                        }
-                        catch (Exception ex)
-                        {
-                            LogMessage($"⚠️ Error extrayendo {entry.FullName}: {ex.Message}");
-                        }
-                        
-                        currentEntry++;
-                        int progress = 55 + (int)(currentEntry * 40.0 / totalEntries);
-                        UpdateProgress(progress);
-                        
-                        if (currentEntry % 100 == 0 || currentEntry == totalEntries)
-                        {
-                            LogMessage($"Extrayendo: {currentEntry}/{totalEntries} archivos");
-                            UpdateStatus($"Extrayendo: {currentEntry}/{totalEntries} archivos", progress);
-                        }
-                    }
-                }
-                
-                if (!isInstalling)
-                {
-                    LogMessage("Instalación cancelada por el usuario");
-                    if (tempFile != null && File.Exists(tempFile)) File.Delete(tempFile);
-                    return;
-                }
-                
-                // Eliminar archivo temporal
-                if (tempFile != null && File.Exists(tempFile))
-                {
-                    File.Delete(tempFile);
-                    LogMessage("Archivo temporal eliminado");
-                }
-                
-                // Crear archivo de versión
-                CreateVersionFile();
-                
-                // Completar
-                UpdateStatus("Instalación completada", 100);
-                LogMessage("¡Instalación completada exitosamente!");
-                LogMessage($"Ubicación: {installPath}");
-                
-                // Mostrar mensaje de éxito
-                this.Invoke(new Action(() =>
-                {
-                    MessageBox.Show(
-                        "✅ INSTALACIÓN COMPLETADA\n\n" +
-                        "Atlas Interactivo se ha instalado exitosamente\n\n" +
-                        $"Ubicación:\n{installPath}\n\n" +
-                        "¡Gracias por instalar Atlas Interactivo!",
-                        "Instalación Completada",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
-                }));
-                
-                isInstalling = false;
-            }
-            catch (WebException ex) when (ex.Status == WebExceptionStatus.NameResolutionFailure)
+        
+        private void LogMessage(string message, Color? color = null)
+        {
+            if (this.InvokeRequired)
             {
-                LogMessage("❌ ERROR: No se puede resolver 'drive.google.com'");
-                LogMessage("   Verifica tu conexión a Internet");
-                UpdateStatus("Error de conexión", 0);
-                
-                this.Invoke(new Action(() =>
-                {
-                    MessageBox.Show(
-                        "❌ ERROR DE CONEXIÓN\n\n" +
-                        "No se puede conectar a Google Drive\n\n" +
-                        "Posibles soluciones:\n" +
-                        "• Verifica tu conexión a Internet\n" +
-                        "• Verifica el firewall/antivirus\n" +
-                        "• Intenta nuevamente más tarde",
-                        "Error de conexión",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                }));
+                this.Invoke(new Action(() => LogMessage(message, color)));
+                return;
             }
-            catch (WebException ex) when ((ex.Response as HttpWebResponse)?.StatusCode == HttpStatusCode.NotFound)
+            
+            if (color.HasValue)
             {
-                LogMessage("❌ ERROR: Archivo no encontrado en Google Drive (404)");
-                UpdateStatus("Archivo no encontrado", 0);
-                
-                this.Invoke(new Action(() =>
-                {
-                    MessageBox.Show(
-                        "❌ ARCHIVO NO ENCONTRADO\n\n" +
-                        "No se encontró el archivo en Google Drive\n\n" +
-                        "Posibles causas:\n" +
-                        "• El archivo fue movido o eliminado\n" +
-                        "• El ID del archivo es incorrecto\n" +
-                        "• Contacta al soporte técnico",
-                        "Error de descarga",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                }));
+                AppendColoredLogMessage($"[{DateTime.Now:HH:mm:ss}] {message}", color.Value);
             }
-            catch (OperationCanceledException)
+            else
             {
-                LogMessage("Instalación cancelada por el usuario");
-                UpdateStatus("Instalación cancelada", 0);
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"❌ ERROR: {ex.Message}");
-                LogMessage($"Detalles: {ex.GetType().Name}");
-                UpdateStatus("Instalación fallida", 0);
-                
-                this.Invoke(new Action(() =>
-                {
-                    MessageBox.Show(
-                        "❌ ERROR EN LA INSTALACIÓN\n\n" +
-                        $"{ex.Message}\n\n" +
-                        "Posibles soluciones:\n" +
-                        "• Verifica tu conexión a Internet\n" +
-                        "• Asegúrate de tener al menos 25 GB libres\n" +
-                        "• Verifica permisos de escritura\n" +
-                        "• Intenta nuevamente",
-                        "Error de instalación",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                }));
-            }
-            finally
-            {
-                // Limpiar
-                if (tempFile != null && File.Exists(tempFile))
-                {
-                    try { File.Delete(tempFile); } catch { }
-                }
-                
-                downloadClient?.Dispose();
-                downloadClient = null;
-                
-                this.Invoke(new Action(() =>
-                {
-                    isInstalling = false;
-                    btnInstall.Enabled = true;
-                    btnBrowse.Enabled = true;
-                    btnExit.Enabled = true;
-                    btnAbout.Enabled = true;
-                    btnInstall.Text = "INICIAR INSTALACIÓN";
-                }));
+                txtLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}\n");
+                txtLog.ScrollToCaret();
             }
         }
-        
-        // ========== MÉTODOS AUXILIARES ==========
         
         private void UpdateStatus(string message, int progress)
         {
@@ -1165,9 +2686,17 @@ namespace AtlasInstaller
             }
             
             lblStatus.Text = message;
-            progressBar.Value = Math.Min(100, Math.Max(0, progress));
+            
+            // Solo actualizar si el progreso es diferente
+            if (progressBar.Value != progress)
+            {
+                progressBar.Value = Math.Min(100, Math.Max(0, progress));
+            }
+            
+            // Forzar actualización de la UI
+            Application.DoEvents();
         }
-        
+
         private void UpdateProgress(int value)
         {
             if (this.InvokeRequired)
@@ -1177,60 +2706,671 @@ namespace AtlasInstaller
             }
             
             progressBar.Value = Math.Min(100, Math.Max(0, value));
-        }
-                
-
-
-        private void LogMessage(string message, Color? color = null)
-        {
-            if (this.InvokeRequired)
+            
+            // Actualizar el texto de la barra de progreso
+            if (value >= 0 && value <= 100)
             {
-                this.Invoke(new Action(() => LogMessage(message, color)));
+                progressBar.Style = ProgressBarStyle.Continuous;
+            }
+        }
+
+        
+        private bool CheckDiskSpace()
+        {
+            try
+            {
+                string drivePath = Path.GetPathRoot(installPath);
+                if (string.IsNullOrEmpty(drivePath))
+                    drivePath = "C:\\";
+                
+                DriveInfo drive = new DriveInfo(drivePath);
+                
+                if (!drive.IsReady)
+                {
+                    LogMessage("⚠️ No se puede acceder a la unidad", COLOR_WARNING);
+                    return true; // Permitir instalación si no se puede verificar
+                }
+                
+                long requiredBytes = REQUIRED_SPACE_GB * 1024L * 1024L * 1024L;
+                bool hasSpace = drive.AvailableFreeSpace >= requiredBytes;
+                
+                if (hasSpace)
+                {
+                    LogMessage($"✅ Espacio suficiente: {drive.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0):F2} GB", COLOR_SUCCESS);
+                }
+                else
+                {
+                    LogMessage($"❌ Espacio insuficiente: {drive.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0):F2} GB (requerido: {REQUIRED_SPACE_GB} GB)", COLOR_ERROR);
+                }
+                
+                return hasSpace;
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"⚠️ Error verificando espacio: {ex.Message}", COLOR_WARNING);
+                return true; // Permitir instalación si hay error
+            }
+        }
+        
+        // ========== NUEVOS MÉTODOS PARA INSTALACIÓN MEJORADA ==========
+        
+        private async void BtnInstall_Click(object sender, EventArgs e)
+        {
+            if (isInstalling || isCancelling) return;
+            
+            // Validar ruta
+            if (string.IsNullOrWhiteSpace(txtDirectory.Text))
+            {
+                MessageBox.Show("Por favor, selecciona una ubicación para la instalación.",
+                    "Ubicación requerida", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             
-            // SOLO usar AppendColoredLogMessage si hay color
-            if (color.HasValue)
+            installPath = txtDirectory.Text;
+            
+            // VERIFICAR SI YA ESTÁ INSTALADO
+            if (IsAlreadyInstalled(installPath))
             {
-                AppendColoredLogMessage($"[{DateTime.Now:HH:mm:ss}] {message}", color.Value);
+                var result = MessageBox.Show(
+                    $"Atlas Interactivo ya parece estar instalado en:\n\n{installPath}\n\n" +
+                    "¿Deseas reinstalar? (Se sobrescribirán los archivos existentes)",
+                    "Instalación detectada",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                
+                if (result != DialogResult.Yes) return;
             }
-            else
+            
+            // **Mensaje de confirmación CORREGIDO - Ahora refleja que usa 7-zip**
+            var confirmResult = MessageBox.Show(
+                "MÉTODO 7-ZIP ACTIVADO\n\n" +
+                "✓ Descarga resumible con 3 reintentos\n" +
+                "✓ Extracción por grupos de 50k archivos (método Qt)\n" +
+                "✓ Usa 7-zip para máxima compatibilidad\n" +
+                "✓ Formato TAR optimizado\n" +
+                "✓ 7-zip se instalará automáticamente si no está presente\n" +
+                "✓ Espacio temporal máximo: 25 GB\n\n" +
+                $"Ubicación: {installPath}\n\n" +
+                "¿Desea continuar con la instalación?",
+                "Confirmar instalación",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information);
+            
+            if (confirmResult != DialogResult.Yes) return;
+            
+            // Iniciar instalación
+            isInstalling = true;
+            
+            btnInstall.Enabled = false;
+            btnBrowse.Enabled = false;
+            btnAbout.Enabled = false;
+            btnClearLog.Enabled = false;
+            btnInstall.Text = "Instalando...";
+            
+            // Limpiar log y mostrar información
+            txtLog.Clear();
+            txtLog.AppendText($"\n");
+            txtLog.AppendText($"\n");
+            txtLog.AppendText($"\n");
+            txtLog.AppendText($"\n");
+            txtLog.AppendText($"=== ATLAS INTERACTIVO INSTALADOR ===\n");
+            txtLog.AppendText($"Fecha: {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n");
+            txtLog.AppendText($"Ubicación: {installPath}\n");
+            txtLog.AppendText("Método: Descarga " + (USE_LOCAL_SERVER ? "LOCAL" : "Google Drive") + "\n");
+            txtLog.AppendText($"Reintentos: {MAX_DOWNLOAD_RETRIES}\n");
+            txtLog.AppendText($"Herramienta de extracción: 7-zip\n");
+            txtLog.AppendText($"Grupos de extracción: 50,000 archivos (método Qt)\n\n");
+            
+            LogMessage("Iniciando instalación con método optimizado...", COLOR_PRIMARY);
+            
+            // Crear token de cancelación
+            cancellationTokenSource = new CancellationTokenSource();
+            
+            try
             {
-                // Añadir directamente con timestamp
-                txtLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}\n");
-                txtLog.ScrollToCaret();
+                // **EJECUTAR INSTALACIÓN CON 7-ZIP**
+                await InstallWith7ZipMethod();
+            }
+            catch (OperationCanceledException)
+            {
+                LogMessage("Instalación cancelada por el usuario", COLOR_WARNING);
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"❌ Error crítico: {ex.Message}", COLOR_ERROR);
+                LogMessage($"Tipo: {ex.GetType().Name}", COLOR_ERROR);
+                LogMessage($"Stack trace: {ex.StackTrace}", COLOR_ERROR);
+                
+                MessageBox.Show(
+                    $"Error crítico durante la instalación:\n\n{ex.Message}\n\n" +
+                    "Por favor, intenta nuevamente o contacta al soporte.",
+                    "Error crítico",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            finally
+            {
+                // Restaurar UI
+                isInstalling = false;
+                isCancelling = false;
+                
+                this.Invoke(new Action(() =>
+                {
+                    btnInstall.Enabled = true;
+                    btnBrowse.Enabled = true;
+                    btnExit.Enabled = true;
+                    btnAbout.Enabled = true;
+                    btnClearLog.Enabled = true;
+                    btnInstall.Text = "INICIAR INSTALACIÓN";
+                    UpdateDiskSpace(); // Actualizar espacio después de instalación
+                }));
+                
+                cancellationTokenSource?.Dispose();
+                cancellationTokenSource = null;
+            }
+        }
+        
+
+        private async Task InstallWith7ZipMethod()
+        {
+            try
+            {
+
+                if (!progressTimer.Enabled)
+                {
+                    progressTimer.Start();
+                }
+
+                // VERIFICAR SI YA ESTÁ INSTALADO
+                if (IsAlreadyInstalled(installPath))
+                {
+                    LogMessage("✅ Instalación detectada - No se requiere descarga", COLOR_SUCCESS);
+                    UpdateStatus("Instalación ya completada", 100);
+                    
+                    this.Invoke(new Action(() =>
+                    {
+                        MessageBox.Show(
+                            "✅ INSTALACIÓN YA COMPLETA\n\n" +
+                            "Atlas Interactivo ya está instalado en:\n" +
+                            $"{installPath}\n\n" +
+                            "No se requiere descarga adicional.",
+                            "Instalación Detectada",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+                    }));
+                    return;
+                }
+
+                UpdateStatus("Verificando 7-zip...", 5);
+                LogMessage("🔍 Verificando 7-zip...");
+                
+                // Verificar e instalar 7-zip si es necesario
+                bool sevenZipReady = await Install7ZipIfNeeded();
+                
+                if (!sevenZipReady)
+                {
+                    throw new Exception("No se pudo instalar o verificar 7-zip. Es requerido para la instalación.");
+                }
+                
+                // Crear directorio de instalación
+                Directory.CreateDirectory(installPath);
+                
+                // === DESCARGA CON MÉTODO TAR Y 7-ZIP ===
+                bool downloadSuccess = false;
+                int downloadAttempt = 0;
+                
+                while (downloadAttempt < MAX_DOWNLOAD_RETRIES && !cancellationTokenSource.Token.IsCancellationRequested)
+                {
+                    downloadAttempt++;
+                    LogMessage($"🔄 Intento {downloadAttempt}/{MAX_DOWNLOAD_RETRIES}...", COLOR_PRIMARY);
+                    UpdateStatus($"Intento {downloadAttempt} de descarga...", 10);
+                    
+                    try
+                    {
+                        if (!USE_LOCAL_SERVER)
+                        {
+                            // USAR Google Drive con 7-zip
+                            downloadSuccess = await DownloadGoogleDriveWith7ZipMethod(GOOGLE_DRIVE_ID, installPath, cancellationTokenSource.Token);
+                        }
+                        else
+                        {
+                            // Para servidor local
+                            string localUrl = "http://10.13.89.84:8000/Atlas_Interactivo_Windows.tar";
+                            UpdateStatus("Conectando con servidor local...", 10);
+                            
+                            using (var downloader = new BufferedTarDownloader(
+                                localUrl, 
+                                installPath, 
+                                new Progress<int>(p => {
+                                    int progress = 10 + (int)(p * 0.9);
+                                    UpdateProgress(Math.Min(100, Math.Max(10, progress)));
+                                }), 
+                                cancellationTokenSource.Token))
+                            {
+                                downloader.LogMessage += (sender, msg) => LogMessage(msg);
+                                downloader.StatusUpdate += (sender, status) => UpdateStatus(status, progressBar.Value);
+                                
+                                downloadSuccess = await downloader.DownloadAndExtractIncremental();
+                            }
+                        }
+                        
+                        if (downloadSuccess) 
+                        {
+                            LogMessage($"✅ Intento {downloadAttempt} exitoso", COLOR_SUCCESS);
+                            break;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"❌ Intento {downloadAttempt} falló: {ex.Message}", COLOR_WARNING);
+                        
+                        if (downloadAttempt < MAX_DOWNLOAD_RETRIES)
+                        {
+                            int waitTime = downloadAttempt * 10;
+                            LogMessage($"⏳ Esperando {waitTime} segundos antes de reintentar...", COLOR_WARNING);
+                            UpdateStatus($"Reintentando en {waitTime} segundos...", 5);
+                            
+                            await Task.Delay(waitTime * 1000, cancellationTokenSource.Token);
+                        }
+                    }
+                }
+                
+                if (!downloadSuccess)
+                {
+                    throw new Exception($"No se pudo descargar el archivo después de {MAX_DOWNLOAD_RETRIES} intentos");
+                }
+                
+                // Verificar que se extrajeron archivos
+                if (!Directory.Exists(installPath) || Directory.GetFiles(installPath, "*", SearchOption.AllDirectories).Length == 0)
+                {
+                    throw new Exception("No se extrajeron archivos o el directorio está vacío");
+                }
+                
+                LogMessage($"✅ Descarga y extracción completadas con 7-zip", COLOR_SUCCESS);
+                UpdateStatus("Extracción completada", 95);
+                
+                // Crear archivo de versión
+                CreateVersionFile7Zip();
+                
+                // Crear accesos directos
+                if (chkDesktop.Checked || chkMenu.Checked)
+                {
+                    UpdateStatus("Creando accesos directos...", 97);
+                    CreateWindowsShortcuts();
+                }
+                
+                // Completar
+                UpdateStatus("Instalación completada", 100);
+                LogMessage("✅ ¡Instalación completada exitosamente con 7-zip!", COLOR_SUCCESS);
+                LogMessage($"Ubicación: {installPath}");
+                
+                // Mostrar mensaje de éxito
+                this.Invoke(new Action(() =>
+                {
+                    MessageBox.Show(
+                        "✅ INSTALACIÓN COMPLETADA CON 7-ZIP\n\n" +
+                        "Atlas Interactivo se ha instalado exitosamente\n\n" +
+                        $"Ubicación:\n{installPath}\n\n" +
+                        "Características instaladas:\n" +
+                        "• Aplicación principal\n" +
+                        "• Archivos de recursos\n" +
+                        "• Documentación\n" +
+                        "• Accesos directos\n\n" +
+                        "¡Gracias por instalar Atlas Interactivo!",
+                        "Instalación Completada",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }));
+            }
+            catch (OperationCanceledException)
+            {
+                LogMessage("Instalación cancelada por el usuario", COLOR_WARNING);
+                UpdateStatus("Instalación cancelada", 0);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"❌ Error en instalación: {ex.Message}", COLOR_ERROR);
+                throw;
+            }
+            finally
+            {
+                progressTimer.Stop();
+                isInstalling = false;
+                isCancelling = false;
+            }
+        }
+
+        private async Task<bool> Install7ZipIfNeeded()
+        {
+            try
+            {
+                // Verificar si 7-zip ya está instalado
+                if (Is7ZipInstalled())
+                {
+                    LogMessage("✅ 7-zip ya está instalado", COLOR_SUCCESS);
+                    return true;
+                }
+                
+                LogMessage("⚠️ 7-zip no encontrado, iniciando instalación...", COLOR_WARNING);
+                
+                // Mostrar mensaje al usuario
+                var result = MessageBox.Show(
+                    "7-zip no está instalado en su sistema.\n\n" +
+                    "Es necesario para extraer los archivos de Atlas Interactivo.\n\n" +
+                    "¿Desea instalar 7-zip ahora? (Recomendado)\n\n" +
+                    "Si selecciona No, deberá instalar 7-zip manualmente.",
+                    "7-zip requerido",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+                
+                if (result == DialogResult.No)
+                {
+                    LogMessage("❌ Usuario canceló la instalación de 7-zip", COLOR_ERROR);
+                    return false;
+                }
+                
+                // Instalar 7-zip
+                return await Install7ZipSimple();
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"❌ Error con 7-zip: {ex.Message}", COLOR_ERROR);
+                return false;
+            }
+        }
+
+        private async Task<bool> DownloadGoogleDriveWith7ZipMethod(string driveId, string extractPath, CancellationToken cancellationToken)
+        {
+            try
+            {
+                // Obtener URL directa
+                string downloadUrl = await GetDirectGoogleDriveUrl(driveId);
+                LogMessage($"🔗 URL de descarga TAR: {downloadUrl}", COLOR_PRIMARY);
+                
+                // INICIAR PROGRESO DESDE 10%
+                UpdateStatus("Obteniendo información del servidor...", 10);
+                
+                // **USAR LA NUEVA CLASE BufferedTarDownloader (que usa 7-zip)**
+                using (var downloader = new BufferedTarDownloader(
+                    downloadUrl, 
+                    extractPath, 
+                    new Progress<int>(p => {
+                        // Ajustar progreso: 10-60% para descarga, 60-100% para extracción
+                        int progress = 10 + (int)(p * 0.9); // 10% a 100%
+                        UpdateProgress(Math.Min(100, Math.Max(10, progress)));
+                    }), 
+                    cancellationToken))
+                {
+                    downloader.LogMessage += (sender, msg) => LogMessage(msg);
+                    downloader.StatusUpdate += (sender, status) => UpdateStatus(status, progressBar.Value);
+                    
+                    LogMessage("🚀 Iniciando descarga con BufferedTarDownloader (7-zip)...", COLOR_PRIMARY);
+                    UpdateStatus("Iniciando descarga y extracción TAR con 7-zip...", 15);
+                    
+                    return await downloader.DownloadAndExtractIncremental();
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"❌ Error descargando TAR: {ex.Message}", COLOR_ERROR);
+                return false;
+            }
+        }
+
+        private void CreateVersionFile7Zip()
+        {
+            try
+            {
+                string versionFile = Path.Combine(installPath, ".atlas_version.json");
+                
+                string json = $@"{{
+                ""version"": ""1.0.0"",
+                ""installed"": true,
+                ""install_path"": ""{installPath.Replace("\\", "\\\\")}"",
+                ""install_date"": ""{DateTime.Now:yyyy-MM-ddTHH:mm:ss}"",
+                ""file_type"": ""tar"",
+                ""download_size"": ""variable"",
+                ""download_resumable"": true,
+                ""download_attempts"": 1,
+                ""extraction_method"": ""7zip_incremental_groups"",
+                ""extraction_groups"": 50000,
+                ""extraction_tool"": ""7-zip"",
+                ""platform"": ""windows"",
+                ""installer_version"": ""3.0.0"",
+                ""requires_7zip"": true,
+                ""requires_tar"": false
+            }}";
+                
+                File.WriteAllText(versionFile, json, Encoding.UTF8);
+                LogMessage("✅ Archivo de versión creado (7-zip)", COLOR_SUCCESS);
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"⚠️ No se pudo crear archivo de versión: {ex.Message}", COLOR_WARNING);
             }
         }
 
 
-        // ========== MÉTODOS DE VERIFICACIÓN ==========
-        
-        private bool CheckDiskSpace(string path, long requiredGB = 25)
+        private void CreateWindowsShortcuts()
         {
             try
             {
-                DriveInfo drive = new DriveInfo(Path.GetPathRoot(path));
-                long availableSpaceGB = drive.AvailableFreeSpace / (1024 * 1024 * 1024);
-                return availableSpaceGB >= requiredGB;
+                LogMessage("=== CREANDO ACCESOS DIRECTOS DE WINDOWS ===");
+                
+                // Buscar el ejecutable principal
+                string executablePath = FindMainExecutable();
+                if (string.IsNullOrEmpty(executablePath))
+                {
+                    LogMessage("❌ No se encontró el ejecutable principal", COLOR_ERROR);
+                    return;
+                }
+                
+                LogMessage($"✅ Ejecutable encontrado: {Path.GetFileName(executablePath)}");
+                
+                // Buscar icono
+                string iconPath = FindIconFile();
+                if (string.IsNullOrEmpty(iconPath))
+                {
+                    iconPath = executablePath; // Usar el ejecutable como icono
+                    LogMessage("⚠️ No se encontró icono específico, usando ejecutable como icono");
+                }
+                else
+                {
+                    LogMessage($"✅ Icono encontrado: {Path.GetFileName(iconPath)}");
+                }
+                
+                // Crear acceso directo en escritorio
+                if (chkDesktop.Checked)
+                {
+                    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                    string desktopShortcut = Path.Combine(desktopPath, "Atlas Interactivo.url");
+                    
+                    CreateShortcut(desktopShortcut, executablePath, iconPath);
+                }
+                
+                // Crear entrada en el menú de inicio
+                if (chkMenu.Checked)
+                {
+                    string startMenuPath = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+                        "Programs",
+                        "Atlas Interactivo");
+                    
+                    Directory.CreateDirectory(startMenuPath);
+                    string startMenuShortcut = Path.Combine(startMenuPath, "Atlas Interactivo.url");
+                    
+                    CreateShortcut(startMenuShortcut, executablePath, iconPath);
+                    
+                    // También crear un desinstalador simple
+                    CreateUninstaller(startMenuPath);
+                }
+                
+                LogMessage("=== ACCESOS DIRECTOS CREADOS EXITOSAMENTE ===", COLOR_SUCCESS);
             }
-            catch
+            catch (Exception ex)
             {
-                return false; // Si hay error, no permitir instalación
+                LogMessage($"❌ Error creando accesos directos: {ex.Message}", COLOR_ERROR);
             }
         }
-        
-        private double GetAvailableSpaceGB(string path)
+
+        private string FindMainExecutable()
         {
             try
             {
-                DriveInfo drive = new DriveInfo(Path.GetPathRoot(path));
-                return drive.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0);
+                // Buscar archivos .exe en el directorio de instalación
+                string[] exeFiles = Directory.GetFiles(installPath, "*.exe", SearchOption.AllDirectories);
+                
+                if (exeFiles.Length == 0)
+                {
+                    LogMessage("❌ No se encontraron archivos .exe en: " + installPath, COLOR_ERROR);
+                    return null;
+                }
+                
+                // Priorizar nombres específicos
+                foreach (string exe in exeFiles)
+                {
+                    string name = Path.GetFileNameWithoutExtension(exe).ToLower();
+                    if (name.Contains("atlas") || name.Contains("main") || name.Contains("launcher"))
+                    {
+                        return exe;
+                    }
+                }
+                
+                // Si no encuentra nombres específicos, usar el primero
+                return exeFiles[0];
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"⚠️ Error buscando ejecutable: {ex.Message}", COLOR_WARNING);
+                return null;
+            }
+        }
+
+        private string FindIconFile()
+        {
+            try
+            {
+                // Buscar iconos en directorios comunes
+                string[] iconPaths = {
+                    Path.Combine(installPath, "icon.ico"),
+                    Path.Combine(installPath, "resources", "icon.ico"),
+                    Path.Combine(installPath, "resources", "logos", "icon.ico"),
+                    Path.Combine(installPath, "Assets", "icon.ico"),
+                    Path.Combine(installPath, "app", "icon.ico"),
+                    Path.Combine(installPath, "*.ico") // Buscar cualquier .ico
+                };
+                
+                foreach (string path in iconPaths)
+                {
+                    if (File.Exists(path))
+                    {
+                        return path;
+                    }
+                    
+                    // Si es un patrón con wildcard
+                    if (path.Contains("*"))
+                    {
+                        string directory = Path.GetDirectoryName(path);
+                        string pattern = Path.GetFileName(path);
+                        
+                        if (Directory.Exists(directory))
+                        {
+                            string[] icoFiles = Directory.GetFiles(directory, pattern);
+                            if (icoFiles.Length > 0)
+                            {
+                                return icoFiles[0];
+                            }
+                        }
+                    }
+                }
+                
+                return null; // No se encontró icono
             }
             catch
             {
-                return 0;
+                return null;
             }
         }
+
+        private void CreateUninstaller(string directory)
+        {
+            try
+            {
+                string uninstallerPath = Path.Combine(directory, "Desinstalar Atlas Interactivo.bat");
+                
+                string batContent = "@echo off\r\n" +
+                                "echo ========================================\r\n" +
+                                "echo   DESINSTALADOR ATLAS INTERACTIVO\r\n" +
+                                "echo ========================================\r\n" +
+                                "echo.\r\n" +
+                                "echo Esta acción eliminará:\r\n" +
+                                "echo   - La carpeta de instalación\r\n" +
+                                "echo   - Los accesos directos\r\n" +
+                                "echo.\r\n" +
+                                "set /p confirm=\"¿Está seguro? (S/N): \"\r\n" +
+                                "if /I \"%confirm%\" NEQ \"S\" (\r\n" +
+                                "  echo Desinstalación cancelada.\r\n" +
+                                "  pause\r\n" +
+                                "  exit /b 1\r\n" +
+                                ")\r\n" +
+                                "echo.\r\n" +
+                                "echo Eliminando carpeta de instalación...\r\n" +
+                                "rmdir /s /q \"" + installPath + "\"\r\n" +
+                                "if %ERRORLEVEL% NEQ 0 (\r\n" +
+                                "  echo Error eliminando la carpeta. Puede necesitar permisos de administrador.\r\n" +
+                                "  pause\r\n" +
+                                "  exit /b 1\r\n" +
+                                ")\r\n" +
+                                "echo.\r\n" +
+                                "echo Eliminando accesos directos...\r\n" +
+                                "del \"" + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Atlas Interactivo.url") + "\" 2>nul\r\n" +
+                                "del \"" + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Atlas Interactivo.bat") + "\" 2>nul\r\n" +
+                                "rmdir /s /q \"" + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Atlas Interactivo") + "\" 2>nul\r\n" +
+                                "echo.\r\n" +
+                                "echo ¡Desinstalación completada!\r\n" +
+                                "echo.\r\n" +
+                                "pause\r\n";
+                
+                File.WriteAllText(uninstallerPath, batContent, Encoding.ASCII);
+                LogMessage($"✅ Desinstalador creado: {Path.GetFileName(uninstallerPath)}", COLOR_SUCCESS);
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"⚠️ No se pudo crear desinstalador: {ex.Message}", COLOR_WARNING);
+            }
+        }
+        
+        private void CreateShortcut(string shortcutPath, string targetPath, string iconPath)
+        {
+            try
+            {
+                // Para Mono, usar método simple sin VBS complejo
+                if (shortcutPath.EndsWith(".lnk"))
+                {
+                    shortcutPath = shortcutPath.Replace(".lnk", ".url");
+                }
+                
+                StringBuilder urlBuilder = new StringBuilder();
+                urlBuilder.AppendLine("[InternetShortcut]");
+                urlBuilder.AppendLine($"URL=file:///{targetPath.Replace('\\', '/')}");
+                urlBuilder.AppendLine($"WorkingDirectory={Path.GetDirectoryName(targetPath)}");
+                
+                if (File.Exists(iconPath))
+                {
+                    urlBuilder.AppendLine($"IconFile={iconPath}");
+                    urlBuilder.AppendLine("IconIndex=0");
+                }
+                
+                File.WriteAllText(shortcutPath, urlBuilder.ToString());
+                LogMessage($"✅ Acceso directo creado: {Path.GetFileName(shortcutPath)}", COLOR_SUCCESS);
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"⚠️ Error creando acceso directo: {ex.Message}", COLOR_WARNING);
+            }
+        }        
+        
         
         private bool IsDirectoryEmpty(string path)
         {
@@ -1240,32 +3380,230 @@ namespace AtlasInstaller
             return !Directory.EnumerateFileSystemEntries(path).Any();
         }
         
-        private void CreateVersionFile()
+        
+
+
+        // ========== PARTE 1: CORREGIR WARNING ==========
+        private void BtnExit_Click(object sender, EventArgs e)
+        {
+            // Usar EXACTAMENTE la misma lógica que MainForm_FormClosing
+            if (isInstalling)
+            {
+                var result = MessageBox.Show(
+                    "⚠️ INSTALACIÓN EN PROGRESO\n\n" +
+                    "¿Estás seguro de que quieres salir?\n" +
+                    "Se cancelará la descarga y se eliminarán los archivos temporales.",
+                    "Confirmar salida",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                
+                if (result == DialogResult.Yes)
+                {
+                    // Ejecutar la misma lógica que la X
+                    isCancelling = true;
+                    isInstalling = false;
+                    
+                    LogMessage("🛑 Cancelando instalación y saliendo...", COLOR_WARNING);
+                    
+                    // 1. Detener timer
+                    if (progressTimer != null)
+                    {
+                        progressTimer.Stop();
+                    }
+                    
+                    // 2. Cancelar operaciones
+                    CancelAllOperations();
+                    
+                    // 3. Eliminar archivos temporales
+                    DeleteTempFilesImmediately();
+                    
+                    // 4. Pequeña pausa
+                    Thread.Sleep(500);
+                    
+                    // 5. Salir
+                    Application.Exit();
+                }
+                // Si dice No, NO hacer nada (igual que la X)
+            }
+            else
+            {
+                // Salida normal
+                Application.Exit();
+            }
+        }
+
+
+        private void CancelAllOperations()
         {
             try
             {
-                string versionFile = Path.Combine(installPath, ".atlas_version.json");
+                LogMessage("🔄 Cancelando todas las operaciones...", COLOR_WARNING);
                 
-                string json = $@"{{
-  ""version"": ""1.0.0"",
-  ""installed"": true,
-  ""install_path"": ""{installPath.Replace("\\", "\\\\")}"",
-  ""install_date"": ""{DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss")}"",
-  ""file_type"": ""zip"",
-  ""download_size"": ""20 GB"",
-  ""platform"": ""windows""
-}}";
+                // 1. Cancelar token (esto cancela las tareas async)
+                if (cancellationTokenSource != null)
+                {
+                    LogMessage("⏹️ Cancelando operaciones en segundo plano...", COLOR_WARNING);
+                    cancellationTokenSource.Cancel();
+                    
+                    // Pequeña pausa
+                    Thread.Sleep(200);
+                    
+                    // Liberar recursos
+                    cancellationTokenSource.Dispose();
+                    cancellationTokenSource = null;
+                }
                 
-                File.WriteAllText(versionFile, json);
-                LogMessage("✅ Archivo de versión creado");
+                // 2. Actualizar estado
+                isInstalling = false;
+                isCancelling = true;
+                
+                // 3. Restaurar estado de la UI inmediatamente
+                if (this.InvokeRequired)
+                {
+                    this.Invoke(new Action(() => RestoreUIAfterCancel()));
+                }
+                else
+                {
+                    RestoreUIAfterCancel();
+                }
+                
+                LogMessage("✅ Operaciones canceladas", COLOR_WARNING);
             }
             catch (Exception ex)
             {
-                LogMessage($"⚠️ No se pudo crear archivo de versión: {ex.Message}");
+                LogMessage($"⚠️ Error durante la cancelación: {ex.Message}", COLOR_WARNING);
             }
         }
+
+        private void RestoreUIAfterCancel()
+        {
+            btnInstall.Enabled = true;
+            btnBrowse.Enabled = true;
+            btnExit.Enabled = true;
+            btnAbout.Enabled = true;
+            btnClearLog.Enabled = true;
+            btnInstall.Text = "INICIAR INSTALACIÓN";
+            lblStatus.Text = "Instalación cancelada";
+            progressBar.Value = 0;
+        }
+
+
+        private void DeleteTempFilesImmediately()
+        {
+            try
+            {
+                LogMessage("🗑️ Eliminando archivos temporales...", COLOR_WARNING);
+                
+                string tempDir = Path.GetTempPath();
+                
+                // Buscar y eliminar TODOS los archivos temporales relacionados con Atlas
+                string[] patterns = new[] { 
+                    "atlas_*.zip", 
+                    "atlas_*.zip.*", 
+                    "atlas_*.tmp", 
+                    "atlas_*.part", 
+                    "Atlas_*.zip",
+                    "Atlas_*.tmp"
+                };
+                
+                foreach (string pattern in patterns)
+                {
+                    try
+                    {
+                        string[] tempFiles = Directory.GetFiles(tempDir, pattern);
+                        foreach (string file in tempFiles)
+                        {
+                            try
+                            {
+                                File.Delete(file);
+                                LogMessage($"   Eliminado: {Path.GetFileName(file)}");
+                            }
+                            catch (Exception ex)
+                            {
+                                LogMessage($"   No se pudo eliminar {Path.GetFileName(file)}: {ex.Message}");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage($"⚠️ Error buscando archivos {pattern}: {ex.Message}", COLOR_WARNING);
+                    }
+                }
+                
+                LogMessage("✅ Archivos temporales eliminados", COLOR_SUCCESS);
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"⚠️ Error eliminando archivos temporales: {ex.Message}", COLOR_WARNING);
+            }
+        }
+
+
+
+        // ========== PARTE 4: ACTUALIZAR MainForm_FormClosing ==========
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            // Si hay una instalación en curso
+            if (isInstalling && !isCancelling)
+            {
+                e.Cancel = true; // IMPORTANTE: Cancelar primero
+                
+                var result = MessageBox.Show(
+                    "⚠️ INSTALACIÓN EN PROGRESO\n\n" +
+                    "¿Estás seguro de que quieres salir?\n" +
+                    "Se cancelará la descarga y se eliminarán los archivos temporales.",
+                    "Confirmar salida",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                
+                if (result == DialogResult.Yes)
+                {
+                    // Marcamos que estamos cancelando
+                    isCancelling = true;
+                    isInstalling = false;
+                    
+                    // Actualizar UI inmediatamente
+                    lblStatus.Text = "Cerrando...";
+                    Application.DoEvents();
+                    
+                    LogMessage("🛑 Cancelando instalación y saliendo...", COLOR_WARNING);
+                    
+                    // 1. Detener timer
+                    if (progressTimer != null)
+                    {
+                        progressTimer.Stop();
+                    }
+                    
+                    // 2. Cancelar operaciones
+                    CancelAllOperations();
+                    
+                    // 3. Eliminar archivos temporales
+                    DeleteTempFilesImmediately();
+                    
+                    // 4. Pequeña pausa para que se procese todo
+                    Thread.Sleep(300);
+                    
+                    // 5. Ahora permitir el cierre
+                    e.Cancel = false;
+                    
+                    // 6. Forzar cierre si todavía está abierto
+                    this.Close();
+                }
+                else
+                {
+                    // Si el usuario dice No, restaurar la bandera
+                    isCancelling = false;
+                }
+            }
+        }
+
+
     }
-    
+
+
+
     static class Program
     {
         [STAThread]
@@ -1273,6 +3611,26 @@ namespace AtlasInstaller
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            
+            // Configurar manejo de excepciones no controladas
+            AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+            {
+                MessageBox.Show(
+                    $"Error crítico no controlado:\n\n{e.ExceptionObject}",
+                    "Error crítico",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            };
+            
+            Application.ThreadException += (sender, e) =>
+            {
+                MessageBox.Show(
+                    $"Error en el hilo de UI:\n\n{e.Exception.Message}",
+                    "Error de UI",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            };
+            
             Application.Run(new MainForm());
         }
     }

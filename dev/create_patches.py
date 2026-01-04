@@ -316,6 +316,19 @@ def build_installers(compiler='mono'):
             if shutil.which("mcs") and compiler == 'mono':
                 print("  Compilando con Mono (mcs)...")
 
+                # subprocess.run([
+                #     "mcs", "-target:winexe",
+                #     "-out:../AtlasInstaller.exe",
+                #     "-r:System.Windows.Forms",
+                #     "-r:System.Drawing",
+                #     "-r:System.Net.Http",
+                #     "-r:System.IO.Compression",
+                #     "-r:System.IO.Compression.FileSystem",
+                #     "-optimize",
+                #     "-debug-",
+                #     cs_source
+                # ], check=True)
+
                 subprocess.run([
                     "mcs", "-target:winexe",
                     "-out:../AtlasInstaller.exe",
@@ -324,7 +337,9 @@ def build_installers(compiler='mono'):
                     "-r:System.Net.Http",
                     "-r:System.IO.Compression",
                     "-r:System.IO.Compression.FileSystem",
+                    "-r:System",
                     "-optimize",
+                    "-debug-",
                     cs_source
                 ], check=True)
 
