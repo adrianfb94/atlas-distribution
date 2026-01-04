@@ -4,75 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Atlas Interactivo - Distribución</title>
-
-
-
-
-
-
-    <!-- JUSTO DESPUÉS DEL <title> -->
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-
-    <!-- Polyfill para CSS Grid en Edge (solo se carga si es necesario) -->
-    <script>
-      // Detectar si es Edge/IE
-      const isEdge = !!window.MSInputMethodContext || !!document.documentMode;
-      
-      if (isEdge) {
-        // Cargar polyfill para CSS Grid solo en Edge
-        const gridPolyfill = document.createElement('script');
-        gridPolyfill.src = 'https://unpkg.com/css-grid-polyfill/dist/css-grid-polyfill.min.js';
-        gridPolyfill.onload = function() {
-          console.log('CSS Grid polyfill cargado para Edge');
-        };
-        document.head.appendChild(gridPolyfill);
-        
-        // Añadir clase al body para CSS específico
-        document.body.classList.add('edge-browser');
-      }
-    </script>
-
-    <!-- CSS con fallbacks para Edge -->
-    <style>
-      /* Estilos que Edge va a ignorar pero otros navegadores usan */
-      .edge-browser .header {
-        backdrop-filter: none;
-      }
-      
-      /* Asegurar que las variables CSS funcionen */
-      .edge-browser {
-        /* Fallback para variables que Edge no soporta bien */
-        --primary-color: #2563eb;
-        --primary-dark: #1d4ed8;
-        --secondary-color: #7c3aed;
-        --text-color: #1f2937;
-        --text-light: #6b7280;
-        --bg-color: #ffffff;
-        --bg-secondary: #f9fafb;
-        --card-bg: #ffffff;
-        --border-color: #e5e7eb;
-        --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-      }
-      
-      .edge-browser[data-theme="dark"] {
-        --primary-color: #3b82f6;
-        --primary-dark: #2563eb;
-        --text-color: #f9fafb;
-        --text-light: #d1d5db;
-        --bg-color: #111827;
-        --bg-secondary: #1f2937;
-        --card-bg: #1f2937;
-        --border-color: #374151;
-      }
-    </style>
-
-    <!-- FINAL DE JUSTO DESPUÉS DEL <title> -->
-
-
-
-
       
 
     <link rel="stylesheet" href="style.css" />
@@ -659,29 +590,6 @@
     <!-- Scripts -->
     <script src="script.js"></script>
     <script src="download.js"></script>
-
-
-    <script>
-      // FIX ULTIMATUM para Edge
-      if (/Edg/.test(navigator.userAgent)) {
-        // Forzar recarga de estilos
-        const links = document.querySelectorAll('link[rel="stylesheet"]');
-        links.forEach(link => {
-          const href = link.href;
-          link.href = '';
-          link.href = href + '?edge=' + Date.now();
-        });
-        
-        // Forzar re-render
-        document.body.style.display = 'none';
-        setTimeout(() => {
-          document.body.style.display = '';
-        }, 100);
-      }
-    </script>
-
-
-
 
   </body>
 </html>
