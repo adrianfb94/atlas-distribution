@@ -15,7 +15,7 @@ Sistema de distribución inteligente para Atlas Interactivo usando GitHub Pages 
 - `/drive_files/` - Archivos grandes en Google Drive (local)
 
 ## 🔧 Para Desarrolladores
-Los archivos grandes (13-20GB) se almacenan en Google Drive.
+Los archivos grandes (20GB) se almacenan en Google Drive.
 Ver `dev/` para el código fuente de los instaladores.
 
 ## 📄 Licencia
