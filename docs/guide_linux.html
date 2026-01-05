@@ -399,11 +399,7 @@
                 nuestra <a href="index.html#download">sección de descargas</a>:
               </p>
 
-              <!-- <p>
-                Visita nuestra
-                <a href="index.html#download">sección de descargas</a> y haz
-                clic en "Descargar AtlasInstallerQt (89 KB)".
-              </p> -->
+
             </div>
           </div>
 
@@ -496,7 +492,7 @@
 
         <div class="code-block">
           Nombre: AtlasInstallerQt<br />
-          Tamaño: 90 KB<br />
+          Tamaño: 211 KB<br />
           Tipo: Ejecutable ELF con Qt5<br />
           SHA256: [checksum disponible en la página]
         </div>
@@ -551,7 +547,7 @@
         <p><strong>Interfaz del instalador:</strong> Verás una ventana con:</p>
         <ul>
           <li>Selector de carpeta de instalación</li>
-          <li>Barra de progreso de descarga (13 GB total)</li>
+          <li>Barra de progreso de descarga (~20 GB total)</li>
           <li>Información de espacio disponible</li>
           <li>Opciones de instalación</li>
         </ul>
@@ -571,7 +567,7 @@
         <div class="step-number">4</div>
         <h3>Descarga Automática del Contenido</h3>
         <p>
-          El instalador Qt descargará los 13 GB de mapas desde Google Drive.
+          El instalador Qt descargará los 20 GB desde Google Drive.
         </p>
 
         <p><strong>Características:</strong></p>
@@ -580,9 +576,19 @@
             <strong>Formato .tar:</strong> Archivo sin compresión para ahorrar
             CPU
           </li>
+
           <li>
-            <strong>Extracción directa:</strong> No requiere espacio extra
+            <strong>Extracción por partes:</strong> Requiere espacio extra de ~ 5GB
           </li>
+
+          <li>
+            <strong>Espacio temporal requerido:</strong> Requiere 25GB
+          </li>
+
+          <li>
+            <strong>Espacio final ocupado:</strong> Al finalizar la descarga y la extracción, ocupará 20GB
+          </li>
+
           <li>
             <strong>Progreso visual:</strong> Barra de progreso en tiempo real
           </li>
@@ -938,11 +944,6 @@
             <div class="terminal">
               <span class="prompt">$</span>
               <span class="command">./AtlasInstallerQt --debug</span><br />
-              <span class="comment"># O para AppImages en general:</span><br />
-              <span class="prompt">$</span>
-              <span class="command"
-                >./AtlasInstallerQt --appimage-extract-and-run</span
-              >
             </div>
           </div>
         </div>
