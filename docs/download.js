@@ -273,9 +273,10 @@ class AtlasDownloader {
                     </li>
                     <li style="margin-bottom: 8px;">Sigue las instrucciones del instalador</li>
                     <li style="margin-bottom: 8px;">Requiere <strong>Windows 10/11 de 64-bit</strong></li>
+                    <li style="margin-bottom: 8px;">Requiere <strong>25GB de espacio libre</strong></li>
                 </ol>
                 <p style="font-size: 12px; color: #666; margin-top: 15px;">
-                    📦 El instalador descargará los 13GB de mapas automáticamente.
+                    📦 El instalador descargará los 20GB de mapas automáticamente.
                 </p>
             </div>
         `;
@@ -294,10 +295,10 @@ class AtlasDownloader {
                     <li style="margin-bottom: 8px;">Hazlo ejecutable: <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-family: monospace;">chmod +x AtlasInstallerQt</code></li>
                     <li style="margin-bottom: 8px;">Ejecuta el instalador: <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-family: monospace;">./AtlasInstallerQt</code></li>
                     <li style="margin-bottom: 8px;">Sigue las instrucciones en pantalla</li>
-                    <li style="margin-bottom: 8px;">Requiere <strong>15GB de espacio libre</strong></li>
+                    <li style="margin-bottom: 8px;">Requiere <strong>25GB de espacio libre</strong></li>
                 </ol>
                 <p style="font-size: 12px; color: #666; margin-top: 15px;">
-                    📦 El instalador Qt descargará y extraerá los 13GB automáticamente.
+                    📦 El instalador Qt descargará y extraerá los 20GB automáticamente.
                 </p>
             </div>
         `;
