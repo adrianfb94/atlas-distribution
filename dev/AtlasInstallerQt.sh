@@ -2675,19 +2675,19 @@ void InstallerWindow::closeEvent(QCloseEvent *event)
         } else {
             event->ignore();
         }
-    } else {
-        QMessageBox::StandardButton reply;
-        reply = QMessageBox::question(this, "Confirmar salida",
-            "¿Estás seguro que deseas salir del instalador?\n\n"
-            "Si tienes una instalación pendiente, podrás reanudarla la próxima vez.",
-            QMessageBox::Yes | QMessageBox::No,
-            QMessageBox::No);
-        
-        if (reply == QMessageBox::Yes) {
-            event->accept();
-        } else {
-            event->ignore();
-        }
+//    } else {
+//        QMessageBox::StandardButton reply;
+//        reply = QMessageBox::question(this, "Confirmar salida",
+//            "¿Estás seguro que deseas salir del instalador?\n\n"
+//            "Si tienes una instalación pendiente, podrás reanudarla la próxima vez.",
+//            QMessageBox::Yes | QMessageBox::No,
+//            QMessageBox::No);
+//        
+//        if (reply == QMessageBox::Yes) {
+//            event->accept();
+//        } else {
+//            event->ignore();
+//        }
     }
 }
 
