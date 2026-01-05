@@ -635,7 +635,7 @@ public slots:
     
 private:
     QString getDirectDownloadUrl() {
-        bool useLocal = true; // Cambiar a false para usar Google Drive real
+        bool useLocal = false; // Cambiar a false para usar Google Drive real
         
         if (useLocal) {
             emit logMessage("🔧 USANDO SERVIDOR LOCAL para pruebas");
@@ -2787,7 +2787,7 @@ void InstallerWindow::startInstallation()
     logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Extracción por grupos de 50k archivos");
     logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Espacio temporal máximo: 25 GB");
     
-    QString driveId = "1mWKA6AKcPJAHiTfVkwuaQBfMp7LU8h-i";
+    QString driveId = "1y8_Lt0xO5hp3Wbx1hQrZOc_ZP1Vj70-y";
     
     currentThread = new QThread;
     currentWorker = new InstallWorker(installDir, driveId);
