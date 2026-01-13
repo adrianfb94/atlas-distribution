@@ -1,0 +1,359 @@
+#!/bin/bash
+#!/usr/bin/env bash
+# =============================================================================
+# ATLAS INTERACTIVO - INSTALADOR UNIVERSAL PARA LINUX
+# =============================================================================
+# Este es un ÚNICO archivo que descarga y ejecuta AtlasInstallerQt
+# =============================================================================
+
+set -e  # Detener en primer error
+
+# =============================================================================
+# CONFIGURACIÓN
+# =============================================================================
+VERSION="1.0.0"
+APP_NAME="Atlas Interactivo"
+INSTALL_DIR="$HOME/Atlas_Interactivo"
+REQUIRED_SPACE_GB=25
+TEMP_DIR="/tmp/atlas_installer_$(date +%s)"
+
+# URLs de descarga
+DOWNLOAD_URL_QT="https://github.com/adrianfb94/atlas-distribution/releases/latest/download/AtlasInstallerQt"
+
+# =============================================================================
+# COLORES Y FORMATO
+# =============================================================================
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+BOLD='\033[1m'
+UNDERLINE='\033[4m'
+
+# =============================================================================
+# FUNCIONES DE LOG
+# =============================================================================
+log() { echo -e "${BLUE}[*]${NC} $1"; }
+info() { echo -e "${CYAN}[i]${NC} $1"; }
+success() { echo -e "${GREEN}[✓]${NC} $1"; }
+warning() { echo -e "${YELLOW}[!]${NC} $1"; }
+error() { echo -e "${RED}[✗]${NC} $1"; }
+title() { echo -e "${BOLD}${MAGENTA}$1${NC}"; }
+separator() { echo "=================================================================="; }
+
+# =============================================================================
+# FUNCIONES DEL SISTEMA
+# =============================================================================
+
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        echo "$ID"
+    else
+        echo "unknown"
+    fi
+}
+
+command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+check_qt_dependencies() {
+    log "Verificando bibliotecas Qt..."
+    
+    local missing_libs=()
+    local qt_libs=("libQt5Widgets.so.5" "libQt5Gui.so.5" "libQt5Core.so.5" "libQt5Network.so.5")
+    
+    for lib in "${qt_libs[@]}"; do
+        if ! ldconfig -p 2>/dev/null | grep -q "$lib" && \
+           [ ! -f "/usr/lib/x86_64-linux-gnu/$lib" ] && \
+           [ ! -f "/usr/lib/$lib" ]; then
+            missing_libs+=("$lib")
+        fi
+    done
+    
+    if [ ${#missing_libs[@]} -eq 0 ]; then
+        success "Qt5 está instalado correctamente"
+        return 0
+    else
+        warning "Faltan bibliotecas Qt: ${missing_libs[*]}"
+        return 1
+    fi
+}
+
+check_system_tools() {
+    log "Verificando herramientas del sistema..."
+    
+    local missing_tools=()
+    local required_tools=("tar" "wget" "curl")
+    
+    for tool in "${required_tools[@]}"; do
+        if ! command_exists "$tool"; then
+            missing_tools+=("$tool")
+        fi
+    done
+    
+    if [ ${#missing_tools[@]} -eq 0 ]; then
+        success "Herramientas del sistema disponibles"
+        return 0
+    else
+        warning "Faltan herramientas: ${missing_tools[*]}"
+        return 1
+    fi
+}
+
+install_dependencies_debian() {
+    log "Instalando dependencias para Debian/Ubuntu..."
+    
+    echo "Actualizando repositorios..."
+    if ! sudo apt update; then
+        error "Error al actualizar repositorios"
+        return 1
+    fi
+    
+    echo "Instalando paquetes..."
+    if ! sudo apt install -y \
+        tar wget curl \
+        libqt5widgets5 libqt5gui5 libqt5core5a libqt5network5 \
+        qt5-qmake qtbase5-dev libxcb-xinerama0; then
+        error "Error instalando paquetes"
+        return 1
+    fi
+    
+    return 0
+}
+
+download_installer() {
+    local output_file="$TEMP_DIR/AtlasInstallerQt"
+    
+    # Limpiar archivo anterior si existe
+    rm -f "$output_file" 2>/dev/null
+    
+    log "Descargando instalador desde GitHub..."
+    
+    if command_exists wget; then
+        info "Usando wget..."
+        if wget --show-progress -q -O "$output_file" "$DOWNLOAD_URL_QT"; then
+            if [ -s "$output_file" ]; then
+                chmod +x "$output_file"
+                success "Instalador descargado"
+                return 0
+            else
+                error "El archivo descargado está vacío"
+                return 1
+            fi
+        else
+            error "Error al descargar con wget"
+            return 1
+        fi
+    elif command_exists curl; then
+        info "Usando curl..."
+        if curl -# -L -o "$output_file" "$DOWNLOAD_URL_QT"; then
+            if [ -s "$output_file" ]; then
+                chmod +x "$output_file"
+                success "Instalador descargado"
+                return 0
+            else
+                error "El archivo descargado está vacío"
+                return 1
+            fi
+        else
+            error "Error al descargar con curl"
+            return 1
+        fi
+    else
+        error "No se encontró wget ni curl"
+        return 1
+    fi
+}
+
+# =============================================================================
+# FLUJO PRINCIPAL
+# =============================================================================
+
+main_installation_flow() {
+    clear
+    separator
+    title "ATLAS INTERACTIVO - INSTALACIÓN UNIVERSAL"
+    separator
+    echo ""
+    
+    # Crear directorio temporal
+    mkdir -p "$TEMP_DIR"
+    info "Directorio temporal: $TEMP_DIR"
+    
+    local qt_binary=""
+    
+    # Verificar Internet
+    info "Verificando conexión a Internet..."
+    if ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -W 2 google.com >/dev/null 2>&1; then
+        success "✓ Internet disponible"
+        
+        # Descargar automáticamente
+        info "Descargando instalador automáticamente..."
+        if download_installer; then
+            qt_binary="$TEMP_DIR/AtlasInstallerQt"
+            success "✓ Instalador descargado exitosamente"
+        else
+            error "✗ No se pudo descargar el instalador"
+            echo ""
+            echo "Soluciones posibles:"
+            echo "1. Verifica tu conexión a Internet"
+            echo "2. Descarga manualmente desde:"
+            echo "   $DOWNLOAD_URL_QT"
+            echo "3. Contacta con soporte técnico"
+            exit 1
+        fi
+    else
+        error "✗ Sin conexión a Internet"
+        echo "No se puede descargar el instalador."
+        echo "Por favor, conecta a Internet y vuelve a intentar."
+        exit 1
+    fi
+    
+    # Verificar que tenemos un binario válido
+    if [ ! -f "$qt_binary" ] || [ ! -x "$qt_binary" ]; then
+        error "No se pudo obtener un instalador válido"
+        exit 1
+    fi
+    
+    info "Instalador listo: $(basename "$qt_binary")"
+    
+    # Verificar dependencias automáticamente
+    info "Verificando dependencias del sistema..."
+    
+    local need_deps=false
+    if ! check_qt_dependencies || ! check_system_tools; then
+        need_deps=true
+    fi
+    
+    if [ "$need_deps" = true ]; then
+        info "Se necesitan instalar algunas dependencias"
+        
+        # Detectar distribución
+        distro=$(detect_distro)
+        info "Distribución detectada: $distro"
+        
+        # Solo instalar si es Ubuntu/Debian
+        if [[ "$distro" == "ubuntu" || "$distro" == "debian" ]]; then
+            echo ""
+            read -p "¿Instalar dependencias automáticamente ahora? (S/n): " install_deps
+            install_deps=${install_deps:-S}
+            
+            if [[ "$install_deps" =~ ^[Ss]$ ]]; then
+                if install_dependencies_debian; then
+                    success "✓ Dependencias instaladas correctamente"
+                else
+                    warning "✗ Error instalando dependencias"
+                    echo "Puedes instalarlas manualmente con:"
+                    echo "  sudo apt install tar wget curl libqt5widgets5 libqt5gui5 libqt5core5a"
+                    echo ""
+                    read -p "¿Continuar de todos modos? (s/N): " -n 1 -r
+                    echo
+                    if [[ ! $REPLY =~ ^[Ss]$ ]]; then
+                        exit 1
+                    fi
+                fi
+            fi
+        else
+            info "Para $distro, instala manualmente:"
+            echo "  • tar, wget, curl"
+            echo "  • Bibliotecas Qt5"
+            echo ""
+            read -p "¿Continuar de todos modos? (s/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Ss]$ ]]; then
+                exit 1
+            fi
+        fi
+    else
+        success "✓ Todas las dependencias están instaladas"
+    fi
+    
+    # Verificar espacio en disco
+    info "Verificando espacio en disco..."
+    if command_exists df; then
+        available_kb=$(df -k "$HOME" 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
+        available_gb=$(echo "scale=2; $available_kb / 1024 / 1024" | bc 2>/dev/null || echo "0")
+        
+        if (( $(echo "$available_gb >= $REQUIRED_SPACE_GB" | bc -l 2>/dev/null) )); then
+            success "✓ Espacio suficiente: $available_gb GB"
+        else
+            warning "⚠ Espacio limitado: $available_gb GB (se recomiendan $REQUIRED_SPACE_GB GB)"
+            echo ""
+            read -p "¿Continuar de todos modos? (s/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Ss]$ ]]; then
+                exit 1
+            fi
+        fi
+    fi
+    
+    # Ejecutar el instalador Qt
+    echo ""
+    separator
+    title "INICIANDO INSTALADOR GRÁFICO"
+    separator
+    echo ""
+    info "Ejecutando instalador Qt..."
+    echo ""
+    
+    # Configurar entorno para Qt
+    export QT_AUTO_SCREEN_SCALE_FACTOR=1
+    export QT_SCALE_FACTOR=1
+    export QT_QPA_PLATFORM="xcb"
+    
+    # Mostrar información final
+    echo "──────────────────────────────────────────────────"
+    echo "✅ Instalador preparado correctamente"
+    echo "📂 Archivo: $qt_binary"
+    echo "💾 Tamaño: $(du -h "$qt_binary" | cut -f1)"
+    echo "📦 Dependencias: Verificadas"
+    echo "💿 Espacio: Disponible"
+    echo "──────────────────────────────────────────────────"
+    
+    # Ejecutar el instalador Qt
+    exec "$qt_binary" "$@"
+}
+
+# =============================================================================
+# MANEJO DE ARGUMENTOS
+# =============================================================================
+
+# Argumentos simples
+case "${1:-}" in
+    -h|--help)
+        echo "Atlas Interactivo - Instalador Universal v$VERSION"
+        echo "Uso: ./$(basename "$0") [opciones]"
+        echo ""
+        echo "Opciones:"
+        echo "  -h, --help      Mostrar esta ayuda"
+        echo "  -v, --version   Mostrar versión"
+        echo ""
+        echo "Este instalador descarga y ejecuta AtlasInstallerQt automáticamente."
+        exit 0
+        ;;
+    -v|--version)
+        echo "Atlas Interactivo Installer v$VERSION"
+        exit 0
+        ;;
+esac
+
+# =============================================================================
+# EJECUCIÓN PRINCIPAL
+# =============================================================================
+
+# Limpieza al salir
+cleanup() {
+    if [ -d "$TEMP_DIR" ]; then
+        rm -rf "$TEMP_DIR" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+# Ejecutar flujo principal
+main_installation_flow "$@"
+
+exit 0

@@ -1,43 +1,45 @@
 📦 ARCHIVOS PARA DISTRIBUCIÓN ATLAS
 
 ARCHIVOS PRINCIPALES:
-1. AtlasInstaller.exe     - Instalador Windows GUI (C# .NET/WinForms)
-2. AtlasInstallerQt       - Instalador Linux GUI (Qt5)
+1. AtlasInstaller.exe           - Instalador Windows GUI (C# .NET/WinForms)
+2. AtlasInstallerQt             - Instalador Linux GUI (Qt5)
+3. AtlasInstallerQt_plus  - Instalador Universal Linux (auto-dependencias)
 
-REQUISITOS DE EJECUCIÓN:
+REQUISITOS:
 
 WINDOWS:
 - Windows 10/11
-- .NET 8 Runtime (si se compiló con .NET SDK)
-- O Windows Runtime incluido (si se compiló con Mono)
+- .NET 8 Runtime o Windows Runtime incluido
 
-LINUX:
-- Distribución basada en Debian/Ubuntu recomendada
+LINUX (AtlasInstallerQt):
 - Qt5 libraries: sudo apt install libqt5widgets5 libqt5gui5 libqt5core5a
-- tar: sudo apt install tar
-- wget o curl: sudo apt install wget
+- tar, wget/curl
 
-ARCHIVOS DE DATOS EN GOOGLE DRIVE:
-3. Atlas_Windows_v1.0.0.zip  - Datos Windows completo (~20GB)
-4. Atlas_Linux_v1.0.0.tar    - Datos Linux completo (~13GB) - NOTA: Formato .tar
+LINUX (Universal):
+- Solo requiere bash, auto-instala dependencias
 
 INSTALACIÓN:
 
 WINDOWS:
 1. Descargar AtlasInstaller.exe
-2. Ejecutar como administrador (si es necesario)
+2. Ejecutar como administrador
 3. Seguir instrucciones en pantalla
 
-LINUX:
+LINUX Qt:
 1. Descargar AtlasInstallerQt
-2. Terminal: chmod +x AtlasInstallerQt
-3. Terminal: ./AtlasInstallerQt
-4. Seguir instrucciones en pantalla
+2. chmod +x AtlasInstallerQt
+3. ./AtlasInstallerQt
 
-PARA ACTUALIZAR:
-- Los instaladores verifican actualizaciones automáticamente
-- Se descargan solo los archivos modificados (MBs, no GBs)
+LINUX Universal (RECOMENDADO):
+1. Descargar AtlasInstallerQt_plus
+2. chmod +x AtlasInstallerQt_plus  
+3. ./AtlasInstallerQt_plus
+   (Auto-instala dependencias y ejecuta)
 
-CONTACTO Y SOPORTE:
-- Issues en GitHub: https://github.com/adrianfb94/atlas-distribution
+ARCHIVOS DE DATOS:
+- Atlas_Windows_v1.0.0.zip (~20GB)
+- Atlas_Linux_v1.0.0.tar (~13GB)
+
+CONTACTO:
+- GitHub: https://github.com/adrianfb94/atlas-distribution
 - Documentación: docs/index.html
