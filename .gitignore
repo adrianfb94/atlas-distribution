@@ -29,6 +29,7 @@ drive_files/*
 *.cache
 .DS_Store
 Thumbs.db
+rsync.conf
 
 # # 5. ENTORNOS VIRTUALES/PAQUETES
 # node_modules/
