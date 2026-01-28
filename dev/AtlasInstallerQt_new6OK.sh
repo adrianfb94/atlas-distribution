@@ -414,8 +414,6 @@ private:
     qint64 getPartialDownloadSize() const;
     bool promptForResume(qint64 partialSize);
     void showPartialDownloadInfo();
-    void cleanupInstallationTemp();
-
     
     // Componentes de UI
     QWidget *centralWidget;
@@ -464,7 +462,6 @@ private:
     }
 
 
-
 };
 
 #endif
@@ -509,27 +506,17 @@ class InstallWorker : public QObject {
     
 public:
     explicit InstallWorker(const QString &installDir, const QString &downloadMethod, 
-                        const QString &ftpUrl, const QString &driveId) 
+                         const QString &ftpUrl, const QString &driveId) 
         : m_installDir(installDir), m_downloadMethod(downloadMethod), 
-        m_ftpUrl(ftpUrl), m_driveId(driveId), 
-        m_canceled(false), m_downloadAttempts(0),
-        m_lastPartialSize(0), m_totalSize(20LL * 1024 * 1024 * 1024),
-        m_installationSuccess(false) 
+          m_ftpUrl(ftpUrl), m_driveId(driveId), 
+          m_canceled(false), m_downloadAttempts(0),
+          m_lastPartialSize(0), m_totalSize(20LL * 1024 * 1024 * 1024) // 20 GB estimado
     {
-        // CAMBIO: Usar directorio de instalación para archivos temporales persistentes
-        QString tempDir = installDir + "/.temp_download";
-        QDir().mkpath(tempDir); // Crear directorio temporal si no existe
-
-        // IMPORTANTE: No eliminar archivos existentes al iniciar
-        m_tempArchive = tempDir + "/atlas_download.tmp";
-        qDebug() << "DEBUG: Archivo temporal en:" << m_tempArchive;
-
         // Inicializar con el tamaño actual del archivo parcial
-        if (QFile::exists(m_tempArchive)) {
-            m_lastPartialSize = QFileInfo(m_tempArchive).size();
-            qDebug() << "DEBUG: Archivo parcial existente de tamaño:" << m_lastPartialSize;
+        QString tempFilePath = QDir::tempPath() + "/atlas_download.tmp";
+        if (QFile::exists(tempFilePath)) {
+            m_lastPartialSize = QFileInfo(tempFilePath).size();
         }
-        
     }
     
     ~InstallWorker() {
@@ -590,36 +577,9 @@ public slots:
     }
 
     void doWork() {
-        m_installationSuccess = false;
         emit logMessage("Iniciando descarga de Atlas Interactivo...");
         emit logMessage("Esto puede tomar tiempo dependiendo de tu conexión.");
         
-        // ========== VERIFICAR ARCHIVO PARCIAL ANTES DE CUALQUIER COSA ==========
-        bool hasPartial = QFile::exists(m_tempArchive) && QFileInfo(m_tempArchive).size() > 1024;
-        
-        if (hasPartial) {
-            m_lastPartialSize = QFileInfo(m_tempArchive).size();
-            emit logMessage(QString("📊 Archivo parcial detectado: %1").arg(formatBytes(m_lastPartialSize)));
-            
-            // VERIFICACIÓN CRÍTICA: Si el archivo parcial es de Google Drive, podría ser HTML
-            QFile file(m_tempArchive);
-            if (file.open(QIODevice::ReadOnly)) {
-                QByteArray header = file.read(512); // Leer primeros 512 bytes
-                file.close();
-                
-                if (header.contains("<html") || header.contains("<!DOCTYPE") || 
-                    header.contains("Google Drive") || header.contains("Error 4")) {
-                    emit logMessage("❌ ARCHIVO PARCIAL CORRUPTO: Es una página HTML, no un TAR");
-                    emit logMessage("🗑️  Eliminando archivo corrupto...");
-                    QFile::remove(m_tempArchive);
-                    m_lastPartialSize = 0;
-                    hasPartial = false;
-                    emit logMessage("✅ Se descargará desde cero para evitar segmentation fault");
-                }
-            }
-        }
-
-
         // ========== INFORMAR MÉTODO DE DESCARGA ==========
         if (m_downloadMethod == "ftp") {
             emit logMessage("Método de descarga: FTP");
@@ -629,19 +589,9 @@ public slots:
             emit logMessage(" ID de Google Drive: " + m_driveId);
         }
         
-
-        // CREAR DIRECTORIO TEMPORAL EN RUTA DE INSTALACIÓN
-        QString tempDir = m_installDir + "/.temp_download";
-        if (!QDir().mkpath(tempDir)) {
-            emit logMessage("❌ No se pudo crear directorio temporal en: " + tempDir);
-            emit workFinished(false, "Error al crear directorio temporal");
-            return;
-        }
+        // Usar archivo temporal fijo para la descarga
+        m_tempArchive = QDir::tempPath() + "/atlas_download.tmp";
         
-        // Usar archivo temporal EN LA RUTA DE INSTALACIÓN
-        m_tempArchive = tempDir + "/atlas_download.tmp";
-
-
         // VERIFICAR ARCHIVO PARCIAL ANTES DE CUALQUIER COSA
         qint64 existingSize = 0;
         if (QFile::exists(m_tempArchive)) {
@@ -698,63 +648,12 @@ public slots:
         }
         
         emit logMessage(QString("✅ Descarga completada: %1 bytes").arg(fileInfo.size()));
-        
-        // ========== VERIFICACIÓN CRÍTICA: Asegurar que no sea HTML ==========
-        QFile checkFile(m_tempArchive);
-        if (checkFile.open(QIODevice::ReadOnly)) {
-            QByteArray header = checkFile.read(512);
-            checkFile.close();
-            
-            if (header.contains("<html") || header.contains("<!DOCTYPE")) {
-                emit logMessage("❌ ERROR CRÍTICO: Se descargó HTML en lugar del TAR");
-                emit logMessage("   Esto causa segmentation fault al extraer");
-                QFile::remove(m_tempArchive);
-                emit workFinished(false, "Google Drive devolvió página HTML. Intenta con --use-ftp");
-                return;
-            }
-            
-            // Verificar que sea un TAR válido (firma "ustar")
-            if (header.size() > 257) {
-                QByteArray tarSignature = header.mid(257, 6);
-                if (tarSignature == "ustar " || tarSignature == "ustar\0") {
-                    emit logMessage("✅ Archivo TAR verificado (firma ustar encontrada)");
-                } else {
-                    emit logMessage("⚠️  Advertencia: No se encontró firma TAR estándar");
-                }
-            }
-        }
-        
-        emit progressUpdated(50, "Descarga completada y verificada");
+        emit progressUpdated(50, "Descarga completada");
         
         // Resto del código de extracción...
-
         emit progressUpdated(60, "Extrayendo archivos...");
         emit logMessage("Extrayendo archivo .tar en grupos...");
         
-        // ========== SOLO VERIFICAR SI ES UN .tar VÁLIDO AL FINAL ==========
-        emit logMessage("🔍 Verificando integridad del archivo TAR...");
-        QProcess testTar;
-        testTar.start("tar", QStringList() << "-tf" << m_tempArchive);
-
-        if (!testTar.waitForFinished(30000) || testTar.exitCode() != 0) {
-            emit logMessage("❌ ERROR: El archivo TAR está corrupto o incompleto");
-            emit logMessage("   Esto puede causar segmentation fault al extraer");
-            
-            // Mantener el archivo temporal para reanudación
-            if (QFile::exists(m_tempArchive)) {
-                qint64 currentSize = QFileInfo(m_tempArchive).size();
-                emit logMessage(QString("📊 Progreso guardado: %1").arg(formatBytes(currentSize)));
-                emit logMessage("🔄 La próxima ejecución reanudará desde este punto");
-            }
-            
-            emit workFinished(false, "Archivo TAR incompleto o corrupto. Se guardó el progreso para reanudar.");
-            return;
-        }
-
-        QString testOutput = QString::fromUtf8(testTar.readAllStandardOutput());
-        QStringList files = testOutput.split('\n', Qt::SkipEmptyParts);
-        emit logMessage(QString("✅ TAR verificado: %1 archivos listados").arg(files.size()));
-
         bool extractionSuccess = false;
         
         if (extractArchiveIncremental(m_tempArchive, m_installDir)) {
@@ -789,61 +688,13 @@ public slots:
             chmodProcess.start("chmod", QStringList() << "+x" << executable);
             chmodProcess.waitForFinished();
             emit logMessage("✅ Binario hecho ejecutable");
-            
-            // ========== VERIFICACIÓN FINAL: Comprobar que el ejecutable no cause segmentation fault ==========
-            emit logMessage("🔍 Verificando que el ejecutable sea válido...");
-            
-            // Verificar con el comando 'file'
-            QProcess fileProcess;
-            fileProcess.start("file", QStringList() << executable);
-            fileProcess.waitForFinished();
-            
-            QString fileOutput = QString::fromUtf8(fileProcess.readAllStandardOutput());
-            if (fileOutput.contains("ELF") && fileOutput.contains("executable")) {
-                emit logMessage("✅ Ejecutable verificado: " + fileOutput.trimmed());
-            } else {
-                emit logMessage("❌ ERROR: El ejecutable NO es un binario ELF válido");
-                emit logMessage("   Esto causará segmentation fault al ejecutar");
-                emit logMessage("   Salida de 'file': " + fileOutput);
-                
-                // Intentar reparación automática
-                emit logMessage("🛠️  Intentando reparar...");
-                QFile::remove(executable);
-                
-                // Re-extraer solo el ejecutable
-                QProcess tarExtract;
-                tarExtract.start("tar", QStringList() << "-xf" << m_tempArchive 
-                    << "-C" << m_installDir << "Atlas_Interactivo");
-                tarExtract.waitForFinished();
-                
-                if (QFile::exists(executable)) {
-                    emit logMessage("✅ Ejecutable re-extraído");
-                } else {
-                    emit logMessage("❌ No se pudo re-extraer el ejecutable");
-                }
-            }
-        } else {
-            emit logMessage("❌ ERROR: No se encontró el ejecutable Atlas_Interactivo");
-            emit logMessage("   La extracción falló completamente");
         }
         
         createVersionFile();
         
         // Limpiar archivo temporal solo si la instalación fue exitosa
-        if (extractionSuccess) {
-            // NO limpiar el directorio temporal, solo el archivo
-            if (!m_tempArchive.isEmpty() && QFile::exists(m_tempArchive)) {
-                QFile::remove(m_tempArchive);
-            }
-            
-            // NO eliminar el directorio tmp de la instalación
-            // QString tempDir = m_installDir + "/.temp_download";
-            // QDir(tempDir).removeRecursively(); // <-- NO HACER ESTO
-            
-            m_tempArchive.clear();
-            emit logMessage("✅ Archivo temporal eliminado");
-        }
-
+        QFile::remove(m_tempArchive);
+        m_tempArchive.clear();
         
         QProcess syncProcess;
         syncProcess.start("sync", QStringList());
@@ -939,7 +790,9 @@ private:
         QStringList wgetArgs;
         
         // PARÁMETROS PARA REANUDACIÓN - CRÍTICO: usar -c (continue)
+        wgetArgs << "--no-passive-ftp";
         wgetArgs << "-c";  // Continuar descarga - ESTE ES EL PARÁMETRO MÁS IMPORTANTE
+        wgetArgs << "--progress=dot:giga";
         wgetArgs << "-O" << finalOutputPath;
         wgetArgs << "--tries=3";
         wgetArgs << "--timeout=60";
@@ -1977,7 +1830,7 @@ private:
     }
     
     bool extractFileGroupWithPrefix(const QString &archivePath, const QString &outputDir, 
-                                    const QStringList &files, const QString &prefix) {
+                                 const QStringList &files, const QString &prefix) {
         if (files.isEmpty()) {
             return true;
         }
@@ -2054,7 +1907,8 @@ private:
         }
         
         return true;
-    }    
+    }
+    
     bool reorganizeExtractedFiles(const QString &outputDir, const QString &oldDirName) {
         QString oldDirPath = outputDir + "/" + oldDirName;
         QDir oldDir(oldDirPath);
@@ -2177,7 +2031,6 @@ private:
     QString m_driveId;
     QString m_tempArchive;
     bool m_canceled;
-    bool m_installationSuccess;
     int m_downloadAttempts;
     qint64 m_lastPartialSize;
     qint64 m_totalSize;
@@ -2243,26 +2096,6 @@ void InstallerWindow::showPartialDownloadInfo() {
     }
 }
 
-
-
-void InstallerWindow::cleanupInstallationTemp() {
-    QString tempDir = installDir + "/.temp_download";
-    if (QDir(tempDir).exists()) {
-        QDir dir(tempDir);
-        QStringList tempFiles = dir.entryList(QDir::Files);
-        
-        foreach (const QString &file, tempFiles) {
-            QString filePath = tempDir + "/" + file;
-            if (QFile::remove(filePath)) {
-                qDebug() << "Eliminado archivo temporal:" << filePath;
-            }
-        }
-        
-        // Intentar eliminar el directorio si está vacío
-        dir.rmdir(tempDir);
-    }
-}
-
 // ========== CONSTRUCTOR MODIFICADO ==========
 
 InstallerWindow::InstallerWindow(QWidget *parent) 
@@ -2276,7 +2109,7 @@ InstallerWindow::InstallerWindow(QWidget *parent)
       currentThread(nullptr),
       m_isInstalling(false),
       downloadMethod("ftp"),
-      ftpUrl("http://modelos.insmet.cu/atlas/installers/Atlas_Interactivo_Linux.tar"),
+      ftpUrl("ftp://atlas.example.com/Atlas_Interactivo_Linux.tar"),
       driveId("1y8_Lt0xO5hp3Wbx1hQrZOc_ZP1Vj70-y")
 {
     qDebug() << "DEBUG: Constructor InstallerWindow - INICIO";
@@ -3201,63 +3034,70 @@ void InstallerWindow::updateDiskSpacePeriodic() {
 
 void InstallerWindow::startInstallation()
 {
-    // Deshabilitar botón inmediatamente
-    installButton->setEnabled(false);
-    browseButton->setEnabled(false);
-    installButton->setText("Instalando...");
+    installDir = directoryEdit->text();
     
-    // Forzar actualización de UI
-    QApplication::processEvents();
+    if (!installDir.endsWith("/Atlas_Interactivo")) {
+        QString newPath = QDir::cleanPath(installDir + "/Atlas_Interactivo");
+        logText->append("[INFO] Ajustando ruta de instalación a: " + newPath);
+        installDir = newPath;
+        directoryEdit->setText(installDir);
+        
+        updateDiskSpace();
+    }
+
+    if (!checkDiskSpace()) {
+        QMessageBox::critical(this, "Espacio insuficiente", 
+            QString("No hay suficiente espacio en disco.\n\n"
+                   "Se requieren 25 GB de espacio libre.\n"
+                   "Espacio disponible: %1\n\n"
+                   "NOTA: Se necesitan 25 GB porque:\n"
+                   "• Archivo comprimido: ~20 GB\n"
+                   "• Buffer de seguridad: 5 GB\n"
+                   "• Archivo temporal se elimina después")
+                   .arg(diskSpaceLabel->text()));
+        return;
+    }
     
-    // Establecer estado de instalación
-    m_isInstalling = true;
-    
-    // CAMBIO: Verificar archivo parcial en la ruta de instalación
-    QString tempDir = installDir + "/.temp_download";
-    QString tempFile = tempDir + "/atlas_download.tmp";
-    
+    // ========== VERIFICAR ARCHIVO PARCIAL ==========
+    QString tempFile = QDir::tempPath() + "/atlas_download.tmp";
     bool hasPartialDownload = false;
     qint64 partialSize = 0;
-    
+
     if (QFile::exists(tempFile)) {
         partialSize = QFileInfo(tempFile).size();
         hasPartialDownload = (partialSize > 1024);
         
         if (hasPartialDownload) {
-            // MOSTRAR DIÁLOGO DE REANUDACIÓN MEJORADO
+            // Calcular porcentaje estimado (50% máximo para fase de descarga)
+            qint64 totalSize = 20LL * 1024 * 1024 * 1024; // 20 GB estimado
+            int initialPercent = qMin(50, static_cast<int>((partialSize * 50) / totalSize));
+            
             QMessageBox msgBox(this);
             msgBox.setWindowTitle("Descarga parcial detectada");
             msgBox.setIcon(QMessageBox::Question);
             msgBox.setText(QString(
-                "Se detectó una descarga parcial de %1.\n\n"
-                "¿Deseas reanudar la instalación?"
-            ).arg(formatBytes(partialSize)));
+                "Se detectó una descarga parcial de %1 (aproximadamente %2% completado).\n\n"
+                "¿Qué deseas hacer?"
+            ).arg(formatBytes(partialSize)).arg(initialPercent));
             
-            // Asegurarnos que el diálogo no se cierre automáticamente
-            msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
-            msgBox.setDefaultButton(QMessageBox::Yes);
+            QPushButton *resumeButton = msgBox.addButton("Reanudar descarga", QMessageBox::AcceptRole);
+            QPushButton *cleanButton = msgBox.addButton("Eliminar y comenzar desde cero", QMessageBox::DestructiveRole);
+            QPushButton *cancelButton = msgBox.addButton("Cancelar", QMessageBox::RejectRole);
             
-            // Forzar que el diálogo sea modal y no se cierre solo
-            msgBox.setModal(true);
+            msgBox.setDefaultButton(resumeButton);
+            msgBox.exec();
             
-            int result = msgBox.exec();
-            
-            if (result == QMessageBox::No) {
-                // Eliminar archivo parcial
-                QFile::remove(tempFile);
-                hasPartialDownload = false;
-            } else if (result == QMessageBox::Cancel) {
-                // Restaurar UI
-                installButton->setEnabled(true);
-                browseButton->setEnabled(true);
-                installButton->setText("INICIAR INSTALACIÓN");
-                m_isInstalling = false;
+            if (msgBox.clickedButton() == cleanButton) {
+                if (QFile::remove(tempFile)) {
+                    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] 🗑️ Archivo parcial eliminado");
+                    hasPartialDownload = false;
+                    partialSize = 0;
+                }
+            } else if (msgBox.clickedButton() == cancelButton) {
                 return;
             }
-            // Si es Yes, continuar con reanudación
         }
     }
-
     
     // Configurar UI antes de comenzar
     installButton->setEnabled(false);
@@ -3405,15 +3245,6 @@ void InstallerWindow::updateDiskSpace()
 void InstallerWindow::installationFinished(bool success, const QString &message)
 {
     m_isInstalling = false;
-
-
-    // Limpiar directorio temporal si la instalación fue exitosa
-    if (success) {
-        cleanupInstallationTemp();
-    }
-
-
-
     
     if (diskSpaceTimer) {
         diskSpaceTimer->stop();
@@ -3437,43 +3268,13 @@ void InstallerWindow::installationFinished(bool success, const QString &message)
     browseButton->setEnabled(true);
     installButton->setText("INICIAR INSTALACIÓN");
     
-    // Forzar actualización
-    QApplication::processEvents();
-
-
-
     updateDiskSpace();
     
     if (success) {
         updateProgress(100, "Instalación completada");
         
         logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] " + message);
-
-
-        // ========== VERIFICACIÓN FINAL: Probar el ejecutable ==========
-        QString executable = installDir + "/Atlas_Interactivo";
-        if (QFile::exists(executable)) {
-            logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] 🔍 Probando ejecutable...");
-            
-            QProcess testProcess;
-            testProcess.start(executable, QStringList() << "--version");
-            
-            if (testProcess.waitForStarted(2000)) {
-                testProcess.waitForFinished(5000);
-                
-                if (testProcess.exitCode() == 0) {
-                    QString output = QString::fromUtf8(testProcess.readAllStandardOutput());
-                    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ✅ Ejecutable funciona: " + output.split('\n').first());
-                } else {
-                    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ⚠️  Ejecutable devuelve código: " + QString::number(testProcess.exitCode()));
-                }
-            } else {
-                logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ❌ ¡ADVERTENCIA! El ejecutable no se inicia");
-                logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "]   Posible segmentation fault - Reinstala");
-            }
-        }
-
-
+        
         // Limpiar archivo temporal después de instalación exitosa
         QString tempFile = QDir::tempPath() + "/atlas_download.tmp";
         if (QFile::exists(tempFile)) {

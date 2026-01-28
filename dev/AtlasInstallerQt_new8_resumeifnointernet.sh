@@ -516,20 +516,17 @@ public:
         m_lastPartialSize(0), m_totalSize(20LL * 1024 * 1024 * 1024),
         m_installationSuccess(false) 
     {
-        // CAMBIO: Usar directorio de instalación para archivos temporales persistentes
+        // CAMBIO IMPORTANTE: Usar ruta de instalación para temporales
         QString tempDir = installDir + "/.temp_download";
         QDir().mkpath(tempDir); // Crear directorio temporal si no existe
-
-        // IMPORTANTE: No eliminar archivos existentes al iniciar
+        
+        // Cambiar la ruta del archivo temporal
         m_tempArchive = tempDir + "/atlas_download.tmp";
-        qDebug() << "DEBUG: Archivo temporal en:" << m_tempArchive;
-
+        
         // Inicializar con el tamaño actual del archivo parcial
         if (QFile::exists(m_tempArchive)) {
             m_lastPartialSize = QFileInfo(m_tempArchive).size();
-            qDebug() << "DEBUG: Archivo parcial existente de tamaño:" << m_lastPartialSize;
         }
-        
     }
     
     ~InstallWorker() {
@@ -731,26 +728,28 @@ public slots:
         emit progressUpdated(60, "Extrayendo archivos...");
         emit logMessage("Extrayendo archivo .tar en grupos...");
         
-        // ========== SOLO VERIFICAR SI ES UN .tar VÁLIDO AL FINAL ==========
-        emit logMessage("🔍 Verificando integridad del archivo TAR...");
+        // ========== VERIFICACIÓN FINAL: Probar que se pueda extraer ==========
+        emit logMessage("🔍 Probando extracción del TAR...");
         QProcess testTar;
         testTar.start("tar", QStringList() << "-tf" << m_tempArchive);
-
-        if (!testTar.waitForFinished(30000) || testTar.exitCode() != 0) {
-            emit logMessage("❌ ERROR: El archivo TAR está corrupto o incompleto");
-            emit logMessage("   Esto puede causar segmentation fault al extraer");
-            
-            // Mantener el archivo temporal para reanudación
-            if (QFile::exists(m_tempArchive)) {
-                qint64 currentSize = QFileInfo(m_tempArchive).size();
-                emit logMessage(QString("📊 Progreso guardado: %1").arg(formatBytes(currentSize)));
-                emit logMessage("🔄 La próxima ejecución reanudará desde este punto");
-            }
-            
-            emit workFinished(false, "Archivo TAR incompleto o corrupto. Se guardó el progreso para reanudar.");
+        
+        if (!testTar.waitForFinished(30000)) {
+            emit logMessage("❌ ERROR: El archivo TAR no se puede leer (corrupto)");
+            emit logMessage("   Esto causará segmentation fault");
+            QFile::remove(m_tempArchive);
+            emit workFinished(false, "Archivo TAR corrupto. La descarga se interrumpió mal.");
             return;
         }
-
+        
+        if (testTar.exitCode() != 0) {
+            QString error = QString::fromUtf8(testTar.readAllStandardError());
+            emit logMessage("❌ ERROR en archivo TAR: " + error.left(100));
+            emit logMessage("🗑️  Eliminando archivo corrupto...");
+            QFile::remove(m_tempArchive);
+            emit workFinished(false, "El TAR está corrupto. Reintenta la instalación.");
+            return;
+        }
+        
         QString testOutput = QString::fromUtf8(testTar.readAllStandardOutput());
         QStringList files = testOutput.split('\n', Qt::SkipEmptyParts);
         emit logMessage(QString("✅ TAR verificado: %1 archivos listados").arg(files.size()));
@@ -830,20 +829,8 @@ public slots:
         createVersionFile();
         
         // Limpiar archivo temporal solo si la instalación fue exitosa
-        if (extractionSuccess) {
-            // NO limpiar el directorio temporal, solo el archivo
-            if (!m_tempArchive.isEmpty() && QFile::exists(m_tempArchive)) {
-                QFile::remove(m_tempArchive);
-            }
-            
-            // NO eliminar el directorio tmp de la instalación
-            // QString tempDir = m_installDir + "/.temp_download";
-            // QDir(tempDir).removeRecursively(); // <-- NO HACER ESTO
-            
-            m_tempArchive.clear();
-            emit logMessage("✅ Archivo temporal eliminado");
-        }
-
+        QFile::remove(m_tempArchive);
+        m_tempArchive.clear();
         
         QProcess syncProcess;
         syncProcess.start("sync", QStringList());
@@ -939,7 +926,9 @@ private:
         QStringList wgetArgs;
         
         // PARÁMETROS PARA REANUDACIÓN - CRÍTICO: usar -c (continue)
+        wgetArgs << "--no-passive-ftp";
         wgetArgs << "-c";  // Continuar descarga - ESTE ES EL PARÁMETRO MÁS IMPORTANTE
+        wgetArgs << "--progress=dot:giga";
         wgetArgs << "-O" << finalOutputPath;
         wgetArgs << "--tries=3";
         wgetArgs << "--timeout=60";
@@ -1977,7 +1966,7 @@ private:
     }
     
     bool extractFileGroupWithPrefix(const QString &archivePath, const QString &outputDir, 
-                                    const QStringList &files, const QString &prefix) {
+                                 const QStringList &files, const QString &prefix) {
         if (files.isEmpty()) {
             return true;
         }
@@ -2054,7 +2043,8 @@ private:
         }
         
         return true;
-    }    
+    }
+    
     bool reorganizeExtractedFiles(const QString &outputDir, const QString &oldDirName) {
         QString oldDirPath = outputDir + "/" + oldDirName;
         QDir oldDir(oldDirPath);
@@ -2276,7 +2266,7 @@ InstallerWindow::InstallerWindow(QWidget *parent)
       currentThread(nullptr),
       m_isInstalling(false),
       downloadMethod("ftp"),
-      ftpUrl("http://modelos.insmet.cu/atlas/installers/Atlas_Interactivo_Linux.tar"),
+      ftpUrl("ftp://atlas.example.com/Atlas_Interactivo_Linux.tar"),
       driveId("1y8_Lt0xO5hp3Wbx1hQrZOc_ZP1Vj70-y")
 {
     qDebug() << "DEBUG: Constructor InstallerWindow - INICIO";

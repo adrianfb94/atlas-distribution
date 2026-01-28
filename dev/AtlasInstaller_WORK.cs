@@ -26,10 +26,7 @@ namespace AtlasInstaller
     {
         private const int BUFFER_SIZE = 81920;
         private const long MAXIMUM_BUFFER_SIZE = 5L * 1024L * 1024L * 1024L; // 5 GB máximo
-        private const long MINIMUM_BUFFER_SIZE = 1L * 1024L * 1024L * 1024L; // 1 GB mínimo <-- AÑADIR ESTA LÍNEA
-
-        private long _currentBufferSize = MAXIMUM_BUFFER_SIZE; // Buffer dinámico
-
+        
         private readonly string _url;
         private readonly string _extractPath;
         private readonly IProgress<int> _progress;
@@ -46,60 +43,14 @@ namespace AtlasInstaller
 
         public event EventHandler<string> LogMessage;
         public event EventHandler<string> StatusUpdate;
-
-
-        // MODIFICAR el constructor para calcular buffer dinámico
+            
         public BufferedTarDownloader(string url, string extractPath, IProgress<int> progress, CancellationToken cancellationToken)
         {
             _url = url;
             _extractPath = extractPath;
             _progress = progress;
             _cancellationToken = cancellationToken;
-            
-            // Calcular buffer dinámico basado en espacio disponible
-            _currentBufferSize = CalculateDynamicBufferSize(extractPath);
-            OnLogMessage($"📊 Buffer dinámico configurado: {_currentBufferSize / (1024.0 * 1024.0 * 1024.0):F2} GB");
         }
-
-
-        // NUEVO MÉTODO: Verificar espacio durante la operación
-        private bool CheckBufferSpace()
-        {
-            try
-            {
-                string tempDir = Path.GetTempPath();
-                string drivePath = Path.GetPathRoot(tempDir);
-                DriveInfo drive = new DriveInfo(drivePath);
-                
-                if (drive.IsReady)
-                {
-                    long requiredSpace = _currentBufferSize + (10L * 1024L * 1024L * 1024L); // Buffer + 10 GB de margen
-                    
-                    if (drive.AvailableFreeSpace < requiredSpace)
-                    {
-                        // Reducir buffer si hay poco espacio
-                        long newBuffer = Math.Max(MINIMUM_BUFFER_SIZE, 
-                            (long)(drive.AvailableFreeSpace * 0.1)); // 10% del espacio disponible
-                        
-                        if (newBuffer < _currentBufferSize)
-                        {
-                            OnLogMessage($"⚠️ Ajustando buffer por espacio: {_currentBufferSize / (1024.0 * 1024.0 * 1024.0):F2} GB → {newBuffer / (1024.0 * 1024.0 * 1024.0):F2} GB");
-                            _currentBufferSize = newBuffer;
-                        }
-                    }
-                    
-                    return true;
-                }
-            }
-            catch (Exception ex)
-            {
-                OnLogMessage($"⚠️ Error verificando espacio buffer: {ex.Message}");
-            }
-            
-            return false;
-        }
-        
-
 
         private void OnLogMessage(string message)
         {
@@ -112,214 +63,28 @@ namespace AtlasInstaller
         }
 
 
-
-        // NUEVO MÉTODO: Calcular buffer dinámico basado en espacio disponible
-        private long CalculateDynamicBufferSize(string targetPath)
-        {
-            try
-            {
-                string drivePath = Path.GetPathRoot(targetPath);
-                if (string.IsNullOrEmpty(drivePath))
-                    drivePath = Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.System));
-                
-                DriveInfo drive = new DriveInfo(drivePath);
-                
-                if (drive.IsReady)
-                {
-                    long availableBytes = drive.AvailableFreeSpace;
-                    
-                    // Estrategia de buffer dinámico:
-                    // 1. Si hay más de 50 GB libres: usar 5 GB (máximo)
-                    if (availableBytes > 50L * 1024L * 1024L * 1024L)
-                    {
-                        OnLogMessage($"💾 Espacio amplio: {availableBytes / (1024.0 * 1024.0 * 1024.0):F2} GB → Buffer: 5 GB");
-                        return MAXIMUM_BUFFER_SIZE;
-                    }
-                    // 2. Si hay 25-50 GB libres: usar 20% del espacio disponible
-                    else if (availableBytes > 25L * 1024L * 1024L * 1024L)
-                    {
-                        long buffer = (long)(availableBytes * 0.2); // 20% del espacio
-                        buffer = Math.Min(buffer, MAXIMUM_BUFFER_SIZE);
-                        buffer = Math.Max(buffer, MINIMUM_BUFFER_SIZE);
-                        OnLogMessage($"💾 Espacio moderado: {availableBytes / (1024.0 * 1024.0 * 1024.0):F2} GB → Buffer: {buffer / (1024.0 * 1024.0 * 1024.0):F2} GB");
-                        return buffer;
-                    }
-                    // 3. Si hay 15-25 GB libres: usar 15% del espacio disponible
-                    else if (availableBytes > 15L * 1024L * 1024L * 1024L)
-                    {
-                        long buffer = (long)(availableBytes * 0.15); // 15% del espacio
-                        buffer = Math.Max(buffer, MINIMUM_BUFFER_SIZE);
-                        OnLogMessage($"💾 Espacio limitado: {availableBytes / (1024.0 * 1024.0 * 1024.0):F2} GB → Buffer: {buffer / (1024.0 * 1024.0 * 1024.0):F2} GB");
-                        return buffer;
-                    }
-                    // 4. Si hay menos de 15 GB libres: usar mínimo pero con advertencia
-                    else
-                    {
-                        OnLogMessage($"⚠️ Espacio crítico: {availableBytes / (1024.0 * 1024.0 * 1024.0):F2} GB → Buffer mínimo: 1 GB");
-                        return MINIMUM_BUFFER_SIZE;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                OnLogMessage($"⚠️ Error calculando buffer: {ex.Message}");
-            }
-            
-            // Fallback: usar buffer estándar
-            OnLogMessage("💾 Usando buffer por defecto: 5 GB");
-            return MAXIMUM_BUFFER_SIZE;
-        }
-
-
-
-
-        private async Task<bool> ExtractIncrementalWithCleanup(string tarPath, string extractPath)
-        {
-            return await Task.Run(() =>
-            {
-                try
-                {
-                    OnLogMessage("🔧 Extrayendo con eliminación incremental...");
-                                        
-                    // 1. Listar todos los archivos en el TAR
-                    OnLogMessage("📋 Listando contenido del TAR...");
-                    
-                    // Usar tu método existente GetTarFileListWith7Zip - CORREGIDO
-                    List<TarFileInfo> fileList = GetTarFileListWith7Zip(tarPath).GetAwaiter().GetResult();
-                    
-                    if (fileList.Count == 0)
-                    {
-                        OnLogMessage("⚠️ No se encontraron archivos en el TAR");
-                        return false;
-                    }
-                    
-                    OnLogMessage($"📊 Total archivos a extraer: {fileList.Count}");
-                    
-                    // 2. Filtrar solo archivos (no directorios)
-                    List<string> filesToExtract = fileList
-                        .Where(f => !f.IsDirectory && !string.IsNullOrEmpty(f.Name))
-                        .Select(f => f.Name)
-                        .ToList();
-                    
-                    // 3. Extraer en grupos más pequeños (500 archivos por grupo)
-                    int groupSize = 500;
-                    int totalGroups = (int)Math.Ceiling(filesToExtract.Count / (double)groupSize);
-                    
-                    for (int group = 0; group < totalGroups; group++)
-                    {
-                        _cancellationToken.ThrowIfCancellationRequested();
-                        
-                        int startIdx = group * groupSize;
-                        int endIdx = Math.Min(startIdx + groupSize, filesToExtract.Count);
-                        int count = endIdx - startIdx;
-                        
-                        List<string> currentGroup = filesToExtract
-                            .Skip(startIdx)
-                            .Take(count)
-                            .ToList();
-                        
-                        OnLogMessage($"📦 Grupo {group + 1}/{totalGroups} ({count} archivos)...");
-                        
-                        // Extraer este grupo específico - CORREGIDO
-                        bool extractSuccess = ExtractFileGroupWith7Zip(tarPath, extractPath, currentGroup, 0).Result;
-                        
-                        if (!extractSuccess)
-                        {
-                            OnLogMessage($"❌ Error extrayendo grupo {group + 1}");
-                            return false;
-                        }
-                        
-                        // Actualizar progreso - SOLO si el método existe
-                        try
-                        {
-                            int progress = 60 + (int)((group + 1) * 40.0 / totalGroups);
-                            
-                            // Si tienes un método UpdateProgress en BufferedTarDownloader
-                            if (_progress != null)
-                            {
-                                _progress.Report(progress);
-                            }
-                            
-                            // O si tienes un evento para actualizar UI
-                            OnStatusUpdate($"Extrayendo... {group + 1}/{totalGroups} grupos");
-                        }
-                        catch { }
-                        
-                        // Log cada 10 grupos
-                        if ((group + 1) % 10 == 0 || group + 1 == totalGroups)
-                        {
-                            OnLogMessage($"   Extraídos {(group + 1) * groupSize}/{filesToExtract.Count} archivos");
-                        }
-                    }
-                    
-                    // 4. Después de extraer todo, eliminar el TAR
-                    OnLogMessage("🗑️ Eliminando archivo TAR ya extraído...");
-                    Thread.Sleep(2000); // Esperar para asegurar que 7-zip liberó el archivo
-                    
-                    int attempts = 0;
-                    while (attempts < 5 && File.Exists(tarPath))
-                    {
-                        try
-                        {
-                            File.Delete(tarPath);
-                            OnLogMessage($"✅ Archivo TAR eliminado (intento {attempts + 1})");
-                            break;
-                        }
-                        catch (IOException)
-                        {
-                            attempts++;
-                            OnLogMessage($"⚠️ Intento {attempts}/5: Archivo aún bloqueado, esperando...");
-                            Thread.Sleep(1000);
-                        }
-                    }
-                    
-                    if (File.Exists(tarPath))
-                    {
-                        OnLogMessage("⚠️ No se pudo eliminar el TAR, se limpiará al reiniciar");
-                    }
-                    
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    OnLogMessage($"❌ Error en extracción incremental: {ex.Message}");
-                    return false;
-                }
-            });
-        }
-
-
-        // MODIFICAR el método DownloadAndExtractIncremental para usar buffer dinámico
         public async Task<bool> DownloadAndExtractIncremental()
         {
             _tempTarPath = Path.Combine(Path.GetTempPath(), $"atlas_{Guid.NewGuid():N}.tar");
             
             try
             {
-                OnLogMessage("🚀 INICIANDO DESCARGA Y EXTRACCIÓN INCREMENTAL");
+                OnLogMessage("🚀 INICIANDO DESCARGA Y EXTRACCIÓN");
                 OnLogMessage($"📁 Archivo temporal: {_tempTarPath}");
                 OnLogMessage($"📁 Extraer a: {_extractPath}");
-                OnLogMessage($"📊 Buffer dinámico: {_currentBufferSize / (1024.0 * 1024.0 * 1024.0):F2} GB");
                 
-                // Verificar espacio para buffer
-                if (!CheckBufferSpace())
-                {
-                    OnLogMessage("⚠️ Espacio insuficiente para el buffer mínimo");
-                    return false;
-                }
-
-                
-                // Verificar si ya está instalado
+                // VERIFICAR SI YA EXISTE LA INSTALACIÓN
                 if (IsInstallationComplete(_extractPath))
                 {
                     OnLogMessage("✅ Instalación ya completa detectada");
+                    OnLogMessage($"📊 Directorio contiene: {CountExtractedFiles(_extractPath)} archivos");
                     return true;
                 }
                 
                 // Crear directorio de extracción
                 Directory.CreateDirectory(_extractPath);
                 
-                // 1. Descargar COMPLETAMENTE el archivo
+                // 1. Primero descargar COMPLETAMENTE el archivo
                 OnLogMessage("📥 Descargando archivo TAR...");
                 bool downloadSuccess = await DownloadToFile(_tempTarPath);
                 
@@ -329,7 +94,19 @@ namespace AtlasInstaller
                     return false;
                 }
                 
-                // 2. Verificar que el archivo existe
+                // 2. CERRAR completamente el stream de archivo antes de proceder
+                OnLogMessage("✅ Descarga completada, cerrando archivo...");
+                if (_tempFileStream != null)
+                {
+                    _tempFileStream.Close();
+                    _tempFileStream.Dispose();
+                    _tempFileStream = null;
+                }
+                
+                // 3. Pequeña pausa para asegurar que el sistema operativo libere el archivo
+                await Task.Delay(1000);
+                
+                // 4. Verificar que el archivo existe y es accesible
                 if (!File.Exists(_tempTarPath))
                 {
                     OnLogMessage("❌ Archivo TAR no encontrado después de la descarga");
@@ -339,21 +116,22 @@ namespace AtlasInstaller
                 FileInfo downloadedFile = new FileInfo(_tempTarPath);
                 double sizeGB = downloadedFile.Length / (1024.0 * 1024.0 * 1024.0);
                 OnLogMessage($"📊 Tamaño del archivo TAR: {sizeGB:F2} GB");
+                OnLogMessage($"📊 Archivo accesible: {(downloadedFile.IsReadOnly ? "Sí" : "Sí, no es de solo lectura")}");
                 
-                // 3. EXTRAER CON ELIMINACIÓN INCREMENTAL
-                OnLogMessage("🔧 Iniciando extracción incremental con 7-zip...");
-                bool extractSuccess = await ExtractIncrementalWithCleanup(_tempTarPath, _extractPath);
+                // 5. INTENTAR EXTRAER CON 7-ZIP
+                OnLogMessage("🔧 Iniciando extracción con 7-zip...");
+                bool extractSuccess = await ExtractAllWith7Zip(_tempTarPath, _extractPath);
                 
                 return extractSuccess;
             }
             catch (Exception ex)
             {
                 OnLogMessage($"❌ ERROR: {ex.Message}");
+                OnLogMessage($"📋 Stack trace: {ex.StackTrace}");
                 return false;
             }
             finally
             {
-                // El Cleanup ahora maneja casos donde la extracción falló
                 Cleanup();
             }
         }
@@ -460,6 +238,7 @@ namespace AtlasInstaller
         }
 
         // Método para obtener lista de archivos usando 7-zip (comando: 7z l test.tar)
+// Método para obtener lista de archivos usando 7-zip (comando: 7z l test.tar)
         private async Task<List<TarFileInfo>> GetTarFileListWith7Zip(string tarPath)
         {
             return await Task.Run(() =>
@@ -769,54 +548,117 @@ namespace AtlasInstaller
             {
                 try
                 {
-                    if (files.Count == 0) return true;
+                    if (files.Count == 0)
+                        return true;
+                    
+                    OnLogMessage($"📄 Extrayendo {files.Count} archivos...");
+                    
+                    // Para 7-zip, necesitamos extraer archivos específicos
+                    // 7-zip no soporta -T como tar, así que usamos un enfoque diferente
                     
                     string sevenZipPath = Get7ZipPath();
                     
-                    // Usar archivo de lista temporal
+                    // Crear archivo de lista temporal
                     string listFile = Path.GetTempFileName();
+                    File.WriteAllLines(listFile, files);
                     
                     try
                     {
-                        // Escribir lista de archivos
-                        File.WriteAllLines(listFile, files);
+                        // Para archivos específicos con 7-zip, necesitamos usar patrones
+                        // Esto es más complejo porque 7-zip no extrae por lista como tar
                         
-                        // Preparar comando 7-zip
-                        string args = $"x \"{tarPath}\" -o\"{extractPath}\" -aoa -y @\"{listFile}\"";
+                        // Enfoque: Extraer todo el TAR pero solo mantener los archivos que necesitamos
+                        // Usar directorio temporal primero
+                        string tempExtractDir = Path.Combine(Path.GetTempPath(), $"atlas_extract_{Guid.NewGuid():N}");
+                        Directory.CreateDirectory(tempExtractDir);
                         
-                        ProcessStartInfo psi = new ProcessStartInfo
+                        try
                         {
-                            FileName = $"\"{sevenZipPath}\"",
-                            Arguments = args,
-                            UseShellExecute = false,
-                            CreateNoWindow = true,
-                            WorkingDirectory = Path.GetDirectoryName(tarPath)
-                        };
-                        
-                        using (Process process = new Process())
-                        {
-                            process.StartInfo = psi;
-                            process.Start();
+                            // Extraer TODO a directorio temporal
+                            string args = $"x \"{tarPath}\" -o\"{tempExtractDir}\" -aoa";
                             
-                            // Timeout ajustado al tamaño del grupo
-                            int timeout = Math.Min(300000, files.Count * 1000); // Máximo 5 minutos
-                            bool completed = process.WaitForExit(timeout);
-                            
-                            if (!completed)
+                            ProcessStartInfo psi = new ProcessStartInfo
                             {
-                                OnLogMessage($"⚠️ Timeout extrayendo grupo de {files.Count} archivos");
-                                process.Kill();
-                                return false;
+                                FileName = $"\"{sevenZipPath}\"",
+                                Arguments = args,
+                                UseShellExecute = false,
+                                RedirectStandardOutput = true,
+                                CreateNoWindow = true
+                            };
+                            
+                            using (Process process = new Process())
+                            {
+                                process.StartInfo = psi;
+                                process.Start();
+                                
+                                // Leer salida para monitorear
+                                StringBuilder output = new StringBuilder();
+                                process.OutputDataReceived += (s, e) => {
+                                    if (!string.IsNullOrEmpty(e.Data))
+                                    {
+                                        output.AppendLine(e.Data);
+                                    }
+                                };
+                                
+                                process.BeginOutputReadLine();
+                                bool completed = process.WaitForExit(180000); // 3 minutos
+                                
+                                if (!completed)
+                                {
+                                    OnLogMessage("❌ Timeout extrayendo grupo");
+                                    process.Kill();
+                                    return false;
+                                }
+                                
+                                if (process.ExitCode != 0)
+                                {
+                                    OnLogMessage($"⚠️ 7-zip falló con código: {process.ExitCode}");
+                                    return false;
+                                }
                             }
                             
-                            if (process.ExitCode != 0)
+                            // Ahora mover solo los archivos que necesitamos al destino final
+                            int movedCount = 0;
+                            foreach (string file in files)
                             {
-                                OnLogMessage($"⚠️ 7-zip grupo falló con código: {process.ExitCode}");
-                                return false;
+                                try
+                                {
+                                    string sourcePath = Path.Combine(tempExtractDir, file);
+                                    string targetPath = Path.Combine(extractPath, ApplyStripComponents(file, stripComponents));
+                                    
+                                    if (File.Exists(sourcePath))
+                                    {
+                                        // Crear directorio destino si no existe
+                                        Directory.CreateDirectory(Path.GetDirectoryName(targetPath));
+                                        
+                                        // Mover archivo
+                                        // File.Move(sourcePath, targetPath, true);
+                                        if (File.Exists(targetPath))
+                                        {
+                                            File.Delete(targetPath);
+                                        }
+                                        File.Move(sourcePath, targetPath);                                        
+                                        movedCount++;
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    OnLogMessage($"⚠️ Error moviendo archivo {file}: {ex.Message}");
+                                }
                             }
+                            
+                            OnLogMessage($"✅ Moved {movedCount}/{files.Count} archivos del grupo");
+                            return movedCount > 0;
                         }
-                        
-                        return true;
+                        finally
+                        {
+                            // Limpiar directorio temporal
+                            try
+                            {
+                                Directory.Delete(tempExtractDir, true);
+                            }
+                            catch { }
+                        }
                     }
                     finally
                     {
@@ -1595,305 +1437,6 @@ namespace AtlasInstaller
         private readonly Color COLOR_FOOTER_BG = Color.FromArgb(44, 62, 80);    // Footer
         private readonly Color COLOR_WARNING = Color.FromArgb(241, 196, 15);    // Amarillo
         
-
-
-        // ========== AÑADIR VARIABLES DE CONFIGURACIÓN ==========
-        private const bool USE_FTP_DEFAULT = true; // Cambiar a false para usar Google Drive por defecto
-        private bool useFTP = USE_FTP_DEFAULT;
-        //private bool useGoogleDrive = !USE_FTP_DEFAULT;
-        private string ftpUrl = "ftp://atlas.example.com/Atlas_Interactivo_Windows.tar"; // Cambiar por tu FTP real
-        private string googleDriveId = "1GrsCj1gQgvGBRf94ovARro_QuGuVCrTk"; // ID del archivo TAR en Google Drive
-
-        // ========== MÉTODO PARA PROCESAR ARGUMENTOS DE LÍNEA DE COMANDOS ==========
-        private void ProcessCommandLineArgs()
-        {
-            string[] args = Environment.GetCommandLineArgs();
-            
-            for (int i = 1; i < args.Length; i++)
-            {
-                string arg = args[i].ToLower();
-                
-                switch (arg)
-                {
-                    case "--use-ftp":
-                    case "/ftp":
-                    case "-ftp":
-                        useFTP = true;
-                        //useGoogleDrive = false;
-                        LogMessage("🌐 Método de descarga configurado: FTP", COLOR_PRIMARY);
-                        break;
-                        
-                    case "--use-drive":
-                    case "/drive":
-                    case "-drive":
-                        useFTP = false;
-                        //useGoogleDrive = true;
-                        LogMessage("🌐 Método de descarga configurado: Google Drive", COLOR_PRIMARY);
-                        break;
-                        
-                    case "--ftp-url":
-                    case "/ftpurl":
-                        if (i + 1 < args.Length)
-                        {
-                            ftpUrl = args[++i];
-                            LogMessage($"🔗 URL FTP configurada: {ftpUrl}", COLOR_PRIMARY);
-                        }
-                        break;
-                        
-                    case "--drive-id":
-                    case "/driveid":
-                        if (i + 1 < args.Length)
-                        {
-                            googleDriveId = args[++i];
-                            LogMessage($"🔗 ID Google Drive configurado: {googleDriveId}", COLOR_PRIMARY);
-                        }
-                        break;
-                        
-                    case "--help":
-                    case "/?":
-                    case "-h":
-                        ShowHelp();
-                        Environment.Exit(0);
-                        break;
-                }
-            }
-        }
-
-        // ========== MOSTRAR AYUDA ==========
-        private void ShowHelp()
-        {
-            string helpText = @"
-        Atlas Interactivo Installer for Windows v1.0.0
-
-        Uso: AtlasInstaller.exe [OPCIONES]
-
-        Opciones de descarga:
-        --use-ftp, /ftp, -ftp      Usar FTP para descarga (POR DEFECTO)
-        --use-drive, /drive, -drive Usar Google Drive para descarga
-        
-        --ftp-url URL              Especificar URL FTP personalizada
-        --drive-id ID              Especificar ID de Google Drive personalizado
-
-        Opciones generales:
-        --help, /?, -h            Mostrar esta ayuda
-        --install-dir PATH        Directorio de instalación
-
-        Ejemplos:
-        AtlasInstaller.exe                      # Usar FTP por defecto
-        AtlasInstaller.exe --use-drive          # Usar Google Drive
-        AtlasInstaller.exe --use-ftp            # Forzar FTP
-        AtlasInstaller.exe --use-drive --drive-id TU_ID_AQUI
-        
-        Configuración FTP por defecto: " + ftpUrl + @"
-
-        NOTA: Requiere 7-zip instalado para extracción.
-        ";
-            
-            MessageBox.Show(helpText, "Ayuda - Atlas Interactivo Installer", 
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
-
-
-        // Método para obtener ruta de wget
-        private string GetWgetPath()
-        {
-            try
-            {
-                // Buscar wget en rutas comunes de Windows
-                string[] possiblePaths = {
-                    @"C:\Program Files\Git\usr\bin\wget.exe",
-                    @"C:\Program Files (x86)\Git\usr\bin\wget.exe",
-                    @"C:\msys64\usr\bin\wget.exe",
-                    @"C:\cygwin64\bin\wget.exe",
-                    @"C:\cygwin\bin\wget.exe",
-                    @"C:\Windows\System32\wget.exe", // Si está en PATH
-                    @"wget.exe" // Buscar en PATH
-                };
-                
-                foreach (string path in possiblePaths)
-                {
-                    if (File.Exists(path))
-                    {
-                        LogMessage($"✅ wget encontrado en: {path}", COLOR_SUCCESS);
-                        return path;
-                    }
-                }
-                
-                // Intentar encontrar wget usando where (comando de Windows)
-                try
-                {
-                    ProcessStartInfo psi = new ProcessStartInfo
-                    {
-                        FileName = "where",
-                        Arguments = "wget",
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        CreateNoWindow = true
-                    };
-                    
-                    using (Process process = new Process())
-                    {
-                        process.StartInfo = psi;
-                        process.Start();
-                        string output = process.StandardOutput.ReadToEnd();
-                        process.WaitForExit();
-                        
-                        if (!string.IsNullOrWhiteSpace(output))
-                        {
-                            string[] paths = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                            foreach (string path in paths)
-                            {
-                                if (path.EndsWith("wget.exe", StringComparison.OrdinalIgnoreCase) && File.Exists(path))
-                                {
-                                    LogMessage($"✅ wget encontrado en PATH: {path}", COLOR_SUCCESS);
-                                    return path;
-                                }
-                            }
-                        }
-                    }
-                }
-                catch { }
-                
-                LogMessage("⚠️ wget no encontrado. Instala Git Bash para usar FTP.", COLOR_WARNING);
-                return null;
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"⚠️ Error buscando wget: {ex.Message}", COLOR_WARNING);
-                return null;
-            }
-        }
-
-
-        private Task<bool> DownloadWithWgetResumable(string url, string outputPath, CancellationToken cancellationToken)
-        {
-            return Task.Run(() =>  // ← Envolver en Task.Run para ejecutar en otro hilo
-            {
-                try
-                {
-                    LogMessage("📥 Iniciando descarga con wget (resumible)...", COLOR_PRIMARY);
-                    
-                    // Verificar si wget está disponible
-                    string wgetPath = GetWgetPath();
-                    if (string.IsNullOrEmpty(wgetPath))
-                    {
-                        LogMessage("❌ wget no encontrado. Instálalo o usa el método HTTP integrado.", COLOR_ERROR);
-                        return false;
-                    }
-                    
-                    // Construir comando wget con opciones similares a Linux
-                    string arguments = $"--no-check-certificate --progress=bar:force:noscroll -c -O \"{outputPath}\" --tries=3 --timeout=60 --waitretry=10 \"{url}\"";
-                    
-                    LogMessage($"🔧 Comando wget: {wgetPath} {arguments}");
-                    
-                    ProcessStartInfo psi = new ProcessStartInfo
-                    {
-                        FileName = wgetPath,
-                        Arguments = arguments,
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true,
-                        WorkingDirectory = Path.GetTempPath()
-                    };
-                    
-                    using (Process process = new Process())
-                    {
-                        process.StartInfo = psi;
-                        process.Start();
-                        
-                        // Leer salida para mostrar progreso
-                        StringBuilder output = new StringBuilder();
-                        StringBuilder error = new StringBuilder();
-                        
-                        process.OutputDataReceived += (s, e) => {
-                            if (!string.IsNullOrEmpty(e.Data))
-                            {
-                                output.AppendLine(e.Data);
-                                
-                                // Parsear progreso de wget (formato: 45%[======>...])
-                                var match = Regex.Match(e.Data, @"(\d+)%\[");
-                                if (match.Success)
-                                {
-                                    int percent = int.Parse(match.Groups[1].Value);
-                                    UpdateProgress(10 + (int)(percent * 0.4));
-                                    UpdateStatus($"Descargando: {percent}%", progressBar.Value);
-                                    
-                                    if (percent % 10 == 0)
-                                    {
-                                        LogMessage($"📥 {percent}% descargado...");
-                                    }
-                                }
-                            }
-                        };
-                        
-                        process.ErrorDataReceived += (s, e) => {
-                            if (!string.IsNullOrEmpty(e.Data))
-                            {
-                                error.AppendLine(e.Data);
-                                
-                                // Log de errores pero continuar
-                                if (!e.Data.Contains("Continuing"))
-                                {
-                                    LogMessage($"[wget] {e.Data}");
-                                }
-                            }
-                        };
-                        
-                        process.BeginOutputReadLine();
-                        process.BeginErrorReadLine();
-                        
-                        // Esperar con timeout (2 horas)
-                        bool completed = process.WaitForExit(7200000);
-                        
-                        if (!completed)
-                        {
-                            LogMessage("❌ Timeout en descarga wget", COLOR_ERROR);
-                            try { process.Kill(); } catch { }
-                            return false;
-                        }
-                        
-                        if (process.ExitCode != 0)
-                        {
-                            LogMessage($"❌ wget falló con código: {process.ExitCode}", COLOR_WARNING);
-                            
-                            // Si es un error de conexión pero el archivo existe parcialmente, podemos continuar
-                            if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 0)
-                            {
-                                LogMessage("⚠️ Archivo parcial descargado. Se puede reanudar en el siguiente intento.", COLOR_WARNING);
-                            }
-                            
-                            return false;
-                        }
-                        
-                        // Verificar que el archivo existe y no está vacío
-                        if (File.Exists(outputPath))
-                        {
-                            FileInfo fileInfo = new FileInfo(outputPath);
-                            if (fileInfo.Length > 0)
-                            {
-                                LogMessage($"✅ Descarga completada: {fileInfo.Length / (1024.0 * 1024.0 * 1024.0):F2} GB", COLOR_SUCCESS);
-                                return true;
-                            }
-                            else
-                            {
-                                LogMessage("❌ Archivo descargado está vacío", COLOR_ERROR);
-                                File.Delete(outputPath);
-                                return false;
-                            }
-                        }
-                        
-                        return false;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogMessage($"❌ Error con wget: {ex.Message}", COLOR_ERROR);
-                    return false;
-                }
-            });
-        }
-
         // Componentes UI (igual que en Qt)
         private Label lblTitle;
         private Label lblSubtitle;
@@ -1940,23 +1483,14 @@ namespace AtlasInstaller
         {
             InitializeComponent();
             SetupUI();
-            // UpdateDiskSpace();
-            UpdateDiskSpaceWithBuffer(); // <-- CAMBIAR AQUÍ
-
-            // // Timer simplificado
-            // progressTimer = new System.Windows.Forms.Timer();
-            // progressTimer.Interval = 1000;
-            // progressTimer.Tick += (s, e) => {
-            //     if (isInstalling) UpdateDiskSpace();
-            // };
+            UpdateDiskSpace();
 
             // Timer simplificado
             progressTimer = new System.Windows.Forms.Timer();
             progressTimer.Interval = 1000;
             progressTimer.Tick += (s, e) => {
-                if (isInstalling) UpdateDiskSpaceWithBuffer(); // <-- CAMBIAR AQUÍ
+                if (isInstalling) UpdateDiskSpace();
             };
-
 
             progressTimer.Start();
         }
@@ -3066,7 +2600,6 @@ namespace AtlasInstaller
 
 
 
-        // ========== MODIFICAR MainForm_Load PARA PROCESAR ARGUMENTOS ==========
         private void MainForm_Load(object sender, EventArgs e)
         {
             // Asegurar que todo esté visible
@@ -3075,133 +2608,12 @@ namespace AtlasInstaller
             // **REDUCIR EL TAMAÑO DE LA VENTANA AL CARGAR**
             this.Height = Math.Min(750, Screen.PrimaryScreen.Bounds.Height - 100);
             
-            // Procesar argumentos de línea de comandos
-            ProcessCommandLineArgs();
-            
-            // Actualizar UI con método de descarga seleccionado
-            UpdateDownloadMethodDisplay();
-            
-            // Actualizar información con buffer dinámico
-            UpdateInfoTextWithBuffer();
-            
-            // Usar UpdateDiskSpaceWithBuffer en lugar de UpdateDiskSpace
-            UpdateDiskSpaceWithBuffer();
-            
             // Asegurar que la ventana esté activa y visible
             this.TopMost = true;
             this.TopMost = false; // Esto trae la ventana al frente
             this.Activate();
             this.Focus();
         }
-
-
-        // ========== ACTUALIZAR MÉTODO DE INFORMACIÓN ==========
-        private void UpdateInfoTextWithBuffer()
-        {
-            if (pnlInfo != null && pnlInfo.Controls.Count > 1)
-            {
-                TextBox infoContent = pnlInfo.Controls[1] as TextBox;
-                if (infoContent != null)
-                {
-                    if (useFTP)
-                    {
-                        infoContent.Text = "• Descarga desde FTP (~20 GB)\r\n" +
-                                        "• Buffer dinámico: 1-5 GB según espacio\r\n" +
-                                        "• Espacio total necesario: 24-28 GB\r\n" +
-                                        "• Archivo temporal se elimina automáticamente\r\n" +
-                                        "• Descarga resumible con 3 reintentos\r\n" +
-                                        "• Requiere 7-zip (se instala automáticamente)\r\n" +
-                                        $"• URL FTP: {ftpUrl}";
-                    }
-                    else
-                    {
-                        infoContent.Text = "• Descarga desde Google Drive (~20 GB)\r\n" +
-                                        "• Buffer dinámico: 1-5 GB según espacio\r\n" +
-                                        "• Espacio total necesario: 24-28 GB\r\n" +
-                                        "• Archivo temporal se elimina automáticamente\r\n" +
-                                        "• Descarga resumible con 3 reintentos\r\n" +
-                                        "• Requiere 7-zip (se instala automáticamente)\r\n" +
-                                        $"• ID Google Drive: {googleDriveId}";
-                    }
-                }
-            }
-        }
-
-
-        // ========== ACTUALIZAR DISPLAY DEL MÉTODO DE DESCARGA ==========
-        private void UpdateDownloadMethodDisplay()
-        {
-            if (this.InvokeRequired)
-            {
-                this.Invoke(new Action(UpdateDownloadMethodDisplay));
-                return;
-            }
-            
-            string methodText = useFTP ? "FTP" : "Google Drive";
-            Color methodColor = useFTP ? COLOR_PRIMARY : Color.FromArgb(66, 133, 244); // Azul Google
-            
-            // Crear o actualizar etiqueta
-            Label lblDownloadMethod = this.Controls.Find("lblDownloadMethod", true).FirstOrDefault() as Label;
-            
-            if (lblDownloadMethod == null)
-            {
-                lblDownloadMethod = new Label();
-                lblDownloadMethod.Name = "lblDownloadMethod";
-                lblDownloadMethod.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-                lblDownloadMethod.TextAlign = ContentAlignment.MiddleCenter;
-                lblDownloadMethod.Dock = DockStyle.Top;
-                lblDownloadMethod.Height = 25;
-                
-                // Insertar después del título
-                Control headerPanel = this.Controls[0]; // Asumiendo que el primer control es el layout principal
-                if (headerPanel is TableLayoutPanel)
-                {
-                    // Encontrar la posición correcta
-                }
-                else
-                {
-                    this.Controls.Add(lblDownloadMethod);
-                    lblDownloadMethod.BringToFront();
-                }
-            }
-            
-            lblDownloadMethod.Text = $"🌐 Método de descarga: {methodText}";
-            lblDownloadMethod.ForeColor = methodColor;
-            
-            // Actualizar mensaje de información
-            UpdateInfoText();
-        }
-
-        // ========== ACTUALIZAR TEXTO INFORMATIVO ==========
-        private void UpdateInfoText()
-        {
-            if (pnlInfo != null && pnlInfo.Controls.Count > 1)
-            {
-                TextBox infoContent = pnlInfo.Controls[1] as TextBox;
-                if (infoContent != null)
-                {
-                    if (useFTP)
-                    {
-                        infoContent.Text = "• Descarga desde FTP (~20 GB)\r\n" +
-                                        "• Se requieren 25 GB de espacio disponible\r\n" +
-                                        "• Archivo temporal se elimina automáticamente\r\n" +
-                                        "• Descarga resumible con 3 reintentos\r\n" +
-                                        "• Requiere 7-zip (se instala automáticamente)\r\n" +
-                                        $"• URL FTP: {ftpUrl}";
-                    }
-                    else
-                    {
-                        infoContent.Text = "• Descarga desde Google Drive (~20 GB)\r\n" +
-                                        "• Se requieren 25 GB de espacio disponible\r\n" +
-                                        "• Archivo temporal se elimina automáticamente\r\n" +
-                                        "• Descarga resumible con 3 reintentos\r\n" +
-                                        "• Requiere 7-zip (se instala automáticamente)\r\n" +
-                                        $"• ID Google Drive: {googleDriveId}";
-                    }
-                }
-            }
-        }
-
 
         private void MainForm_Resize(object sender, EventArgs e)
         {
@@ -3340,7 +2752,8 @@ namespace AtlasInstaller
             }
         }
         
-        // ========== MODIFICAR EL MÉTODO BtnInstall_Click (confirmación) ==========
+        // ========== NUEVOS MÉTODOS PARA INSTALACIÓN MEJORADA ==========
+        
         private async void BtnInstall_Click(object sender, EventArgs e)
         {
             if (isInstalling || isCancelling) return;
@@ -3368,46 +2781,22 @@ namespace AtlasInstaller
                 if (result != DialogResult.Yes) return;
             }
             
-
-            string methodText = useFTP ? "FTP" : "Google Drive";
-
-            // Calcular buffer dinámico para el mensaje
-            double availableGB = GetAvailableSpaceGB();
-            double bufferGB = CalculateOptimalBufferGB(availableGB);
-
-
-            // var confirmResult = MessageBox.Show(
-            //     $"MÉTODO: {methodText.ToUpper()}\n\n" +
-            //     "✓ Descarga resumible con 3 reintentos\n" +
-            //     "✓ Extracción por grupos de 50k archivos (método Qt)\n" +
-            //     "✓ Usa 7-zip para máxima compatibilidad\n" +
-            //     "✓ Formato TAR optimizado\n" +
-            //     "✓ 7-zip se instalará automáticamente si no está presente\n" +
-            //     "✓ Espacio temporal máximo: 25 GB\n\n" +
-            //     $"Ubicación: {installPath}\n\n" +
-            //     "¿Desea continuar con la instalación?",
-            //     "Confirmar instalación",
-            //     MessageBoxButtons.YesNo,
-            //     MessageBoxIcon.Information);
+            // **Mensaje de confirmación CORREGIDO - Ahora refleja que usa 7-zip**
+            var confirmResult = MessageBox.Show(
+                "MÉTODO 7-ZIP ACTIVADO\n\n" +
+                "✓ Descarga resumible con 3 reintentos\n" +
+                "✓ Extracción por grupos de 50k archivos (método Qt)\n" +
+                "✓ Usa 7-zip para máxima compatibilidad\n" +
+                "✓ Formato TAR optimizado\n" +
+                "✓ 7-zip se instalará automáticamente si no está presente\n" +
+                "✓ Espacio temporal máximo: 25 GB\n\n" +
+                $"Ubicación: {installPath}\n\n" +
+                "¿Desea continuar con la instalación?",
+                "Confirmar instalación",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information);
             
-
-        var confirmResult = MessageBox.Show(
-            $"MÉTODO: {methodText.ToUpper()} | BUFFER DINÁMICO: {bufferGB:F1} GB\n\n" +
-            "✓ Descarga resumible con 3 reintentos\n" +
-            "✓ Buffer ajustado al espacio disponible\n" +
-            "✓ Extracción por grupos de 50k archivos\n" +
-            "✓ Usa 7-zip para máxima compatibilidad\n" +
-            "✓ 7-zip se instala automáticamente\n" +
-            $"✓ Espacio temporal: 20.0 GB + {bufferGB:F1} GB buffer\n\n" +
-            $"Ubicación: {installPath}\n" +
-            $"Espacio disponible: {availableGB:F2} GB\n\n" +
-            "¿Desea continuar con la instalación?",
-            "Confirmar instalación con buffer dinámico",
-            MessageBoxButtons.YesNo,
-            MessageBoxIcon.Information);
-
             if (confirmResult != DialogResult.Yes) return;
-
             
             // Iniciar instalación
             isInstalling = true;
@@ -3482,73 +2871,11 @@ namespace AtlasInstaller
         }
         
 
-
-        // Método para obtener espacio disponible en GB
-        private double GetAvailableSpaceGB()
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(installPath))
-                    return 0;
-                    
-                string drivePath = Path.GetPathRoot(installPath);
-                if (string.IsNullOrEmpty(drivePath))
-                    drivePath = "C:\\";
-                
-                DriveInfo drive = new DriveInfo(drivePath);
-                
-                if (drive.IsReady)
-                {
-                    return drive.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0);
-                }
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"⚠️ Error obteniendo espacio: {ex.Message}", COLOR_WARNING);
-            }
-            
-            return 0;
-        }
-
-
-        // ========== MODIFICAR EL MÉTODO DE INSTALACIÓN PRINCIPAL ==========
         private async Task InstallWith7ZipMethod()
         {
             try
             {
-                // Mostrar método de descarga seleccionado
-                string methodText = useFTP ? "FTP" : "Google Drive";
-                LogMessage($"🚀 Iniciando instalación con método: {methodText}", COLOR_PRIMARY);
-                
-                // Verificar espacio con buffer dinámico
-                UpdateDiskSpaceWithBuffer();
-                
-                // Obtener espacio requerido dinámico
-                double availableGB = GetAvailableSpaceGB();
-                double bufferGB = CalculateOptimalBufferGB(availableGB);
-                double requiredGB = 20 + bufferGB + 3; // TAR + Buffer + Margen
-                
-                if (availableGB < requiredGB)
-                {
-                    var result = MessageBox.Show(
-                        $"⚠️ ESPACIO INSUFICIENTE\n\n" +
-                        $"Espacio disponible: {availableGB:F2} GB\n" +
-                        $"Espacio requerido: {requiredGB:F1} GB\n" +
-                        $"• Archivo TAR: 20.0 GB\n" +
-                        $"• Buffer dinámico: {bufferGB:F1} GB\n" +
-                        $"• Margen de seguridad: 3.0 GB\n\n" +
-                        $"¿Desea continuar de todos modos?",
-                        "Advertencia de espacio",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Warning);
-                    
-                    if (result == DialogResult.No)
-                    {
-                        LogMessage("❌ Instalación cancelada por espacio insuficiente", COLOR_ERROR);
-                        return;
-                    }
-                }
-                
+
                 if (!progressTimer.Enabled)
                 {
                     progressTimer.Start();
@@ -3588,7 +2915,7 @@ namespace AtlasInstaller
                 // Crear directorio de instalación
                 Directory.CreateDirectory(installPath);
                 
-                // === DESCARGA CON MÉTODO SELECCIONADO ===
+                // === DESCARGA CON MÉTODO TAR Y 7-ZIP ===
                 bool downloadSuccess = false;
                 int downloadAttempt = 0;
                 
@@ -3600,15 +2927,31 @@ namespace AtlasInstaller
                     
                     try
                     {
-                        if (useFTP)
+                        if (!USE_LOCAL_SERVER)
                         {
-                            // USAR FTP con wget
-                            downloadSuccess = await DownloadWithFtpMethod(ftpUrl, installPath, cancellationTokenSource.Token);
+                            // USAR Google Drive con 7-zip
+                            downloadSuccess = await DownloadGoogleDriveWith7ZipMethod(GOOGLE_DRIVE_ID, installPath, cancellationTokenSource.Token);
                         }
                         else
                         {
-                            // USAR Google Drive con 7-zip
-                            downloadSuccess = await DownloadGoogleDriveWith7ZipMethod(googleDriveId, installPath, cancellationTokenSource.Token);
+                            // Para servidor local
+                            string localUrl = "http://10.13.89.84:8000/Atlas_Interactivo_Windows.tar";
+                            UpdateStatus("Conectando con servidor local...", 10);
+                            
+                            using (var downloader = new BufferedTarDownloader(
+                                localUrl, 
+                                installPath, 
+                                new Progress<int>(p => {
+                                    int progress = 10 + (int)(p * 0.9);
+                                    UpdateProgress(Math.Min(100, Math.Max(10, progress)));
+                                }), 
+                                cancellationTokenSource.Token))
+                            {
+                                downloader.LogMessage += (sender, msg) => LogMessage(msg);
+                                downloader.StatusUpdate += (sender, status) => UpdateStatus(status, progressBar.Value);
+                                
+                                downloadSuccess = await downloader.DownloadAndExtractIncremental();
+                            }
                         }
                         
                         if (downloadSuccess) 
@@ -3658,14 +3001,14 @@ namespace AtlasInstaller
                 
                 // Completar
                 UpdateStatus("Instalación completada", 100);
-                LogMessage("✅ ¡Instalación completada exitosamente!", COLOR_SUCCESS);
+                LogMessage("✅ ¡Instalación completada exitosamente con 7-zip!", COLOR_SUCCESS);
                 LogMessage($"Ubicación: {installPath}");
                 
                 // Mostrar mensaje de éxito
                 this.Invoke(new Action(() =>
                 {
                     MessageBox.Show(
-                        $"✅ INSTALACIÓN COMPLETADA ({methodText})\n\n" +
+                        "✅ INSTALACIÓN COMPLETADA CON 7-ZIP\n\n" +
                         "Atlas Interactivo se ha instalado exitosamente\n\n" +
                         $"Ubicación:\n{installPath}\n\n" +
                         "Características instaladas:\n" +
@@ -3697,255 +3040,6 @@ namespace AtlasInstaller
                 isCancelling = false;
             }
         }
-
-
-
-        // Método actualizado para mostrar espacio con buffer
-        private void UpdateDiskSpaceWithBuffer()
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(installPath))
-                    return;
-                    
-                string drivePath = Path.GetPathRoot(installPath);
-                if (string.IsNullOrEmpty(drivePath))
-                    drivePath = "C:\\";
-                
-                DriveInfo drive = new DriveInfo(drivePath);
-                
-                if (drive.IsReady)
-                {
-                    double availableGB = drive.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0);
-                    
-                    // Calcular buffer dinámico basado en espacio disponible
-                    double bufferGB = CalculateOptimalBufferGB(availableGB);
-                    double requiredTotalGB = 20 + bufferGB + 3; // TAR + Buffer + Margen
-                    
-                    // Usar Invoke para actualizar UI desde hilos secundarios
-                    if (this.InvokeRequired)
-                    {
-                        this.Invoke(new Action(() => {
-                            UpdateDiskSpaceUI(availableGB, bufferGB, requiredTotalGB, drive.Name);
-                        }));
-                    }
-                    else
-                    {
-                        UpdateDiskSpaceUI(availableGB, bufferGB, requiredTotalGB, drive.Name);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                if (isInstalling)
-                {
-                    LogMessage($"⚠️ Error verificando espacio con buffer: {ex.Message}", COLOR_WARNING);
-                }
-            }
-        }
-
-
-        // Método auxiliar para actualizar UI del espacio
-        private void UpdateDiskSpaceUI(double availableGB, double bufferGB, double requiredTotalGB, string driveName)
-        {
-            lblDiskSpace.Text = $"💾 Espacio en {driveName}: {availableGB:F2} GB";
-            lblSpaceWarning.Text = $"Buffer: {bufferGB:F1} GB | Necesario: {requiredTotalGB:F1} GB";
-            
-            if (availableGB >= requiredTotalGB)
-            {
-                lblDiskSpace.ForeColor = COLOR_SUCCESS;
-                lblSpaceWarning.ForeColor = COLOR_SUCCESS;
-                
-                if (isInstalling)
-                {
-                    LogMessage($"💾 Espacio óptimo: {availableGB:F2} GB, Buffer: {bufferGB:F1} GB", COLOR_SUCCESS);
-                }
-            }
-            else if (availableGB >= 20 + bufferGB)
-            {
-                lblDiskSpace.ForeColor = COLOR_WARNING;
-                lblSpaceWarning.ForeColor = COLOR_WARNING;
-                lblSpaceWarning.Text += " (⚠️ Mínimo)";
-                
-                if (isInstalling)
-                {
-                    LogMessage($"⚠️ Espacio mínimo: {availableGB:F2} GB, Buffer reducido: {bufferGB:F1} GB", COLOR_WARNING);
-                }
-            }
-            else
-            {
-                lblDiskSpace.ForeColor = COLOR_ERROR;
-                lblSpaceWarning.ForeColor = COLOR_ERROR;
-                lblSpaceWarning.Text += " (❌ Insuficiente)";
-                
-                if (isInstalling)
-                {
-                    LogMessage($"❌ Espacio insuficiente: {availableGB:F2} GB, Buffer: {bufferGB:F1} GB", COLOR_ERROR);
-                }
-            }
-        }
-
-
-        // Método para calcular buffer óptimo (igual que en BufferedTarDownloader)
-        private double CalculateOptimalBufferGB(double availableGB)
-        {
-            // Misma lógica que en BufferedTarDownloader
-            if (availableGB > 50) return 5.0;         // Máximo: 5 GB
-            if (availableGB > 25) return availableGB * 0.2;  // 20% del espacio
-            if (availableGB > 15) return availableGB * 0.15; // 15% del espacio
-            return 1.0; // Mínimo: 1 GB
-        }
-
-
-        // // Método FTP con buffer dinámico
-        // private async Task<bool> DownloadWithFtpMethod(string url, string extractPath, CancellationToken cancellationToken)
-        // {
-        //     try
-        //     {
-        //         LogMessage($"🌐 Iniciando descarga FTP desde: {url}", COLOR_PRIMARY);
-                
-        //         // Crear archivo temporal
-        //         string tempTarPath = Path.Combine(Path.GetTempPath(), $"atlas_ftp_{Guid.NewGuid():N}.tar");
-                
-        //         // Verificar si wget está disponible
-        //         string wgetPath = GetWgetPath();
-        //         if (string.IsNullOrEmpty(wgetPath))
-        //         {
-        //             LogMessage("❌ wget no encontrado. Instala Git Bash o Cygwin para usar FTP.", COLOR_ERROR);
-        //             return false;
-        //         }
-                
-        //         // Descargar usando wget con opciones similares a Linux
-        //         bool downloadSuccess = await DownloadWithWgetResumable(url, tempTarPath, cancellationToken);
-                
-        //         if (!downloadSuccess)
-        //         {
-        //             LogMessage("❌ Falló la descarga FTP", COLOR_ERROR);
-        //             return false;
-        //         }
-                
-        //         // Extraer con 7-zip (CORREGIDO: usar ExtractWith7Zip en lugar de ExtractWith7ZipWithBuffer)
-        //         LogMessage("🔧 Extrayendo archivo FTP con 7-zip...", COLOR_PRIMARY);
-        //         bool extractSuccess = await ExtractWith7Zip(tempTarPath, extractPath, cancellationToken);
-                
-        //         // Limpiar archivo temporal
-        //         try { File.Delete(tempTarPath); } catch { }
-                
-        //         return extractSuccess;
-        //     }
-        //     catch (Exception ex)
-        //     {
-        //         LogMessage($"❌ Error en descarga FTP: {ex.Message}", COLOR_ERROR);
-        //         return false;
-        //     }
-        // }
-
-
-        // Método Google Drive con buffer dinámico
-        private async Task<bool> DownloadGoogleDriveWithBuffer(string driveId, string extractPath, long bufferSize, CancellationToken cancellationToken)
-        {
-            try
-            {
-                string downloadUrl = await GetDirectGoogleDriveUrl(driveId);
-                
-                // Crear downloader con buffer dinámico
-                var downloader = new BufferedTarDownloader(downloadUrl, extractPath,
-                    new Progress<int>(p => UpdateProgress(10 + (int)(p * 0.9))), cancellationToken);
-                
-                downloader.LogMessage += (sender, msg) => LogMessage(msg);
-                downloader.StatusUpdate += (sender, status) => UpdateStatus(status, progressBar.Value);
-                
-                LogMessage($"🔗 URL: {downloadUrl}");
-                LogMessage($"📊 Buffer: {bufferSize / (1024.0 * 1024.0 * 1024.0):F2} GB");
-                
-                return await downloader.DownloadAndExtractIncremental();
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"❌ Error Google Drive: {ex.Message}", COLOR_ERROR);
-                return false;
-            }
-        }
-
-
-        // ========== NUEVO MÉTODO PARA DESCARGA FTP ==========
-        private async Task<bool> DownloadWithFtpMethod(string url, string extractPath, CancellationToken cancellationToken)
-        {
-            try
-            {
-                LogMessage($"🌐 Iniciando descarga FTP desde: {url}", COLOR_PRIMARY);
-                
-                // Crear archivo temporal
-                string tempTarPath = Path.Combine(Path.GetTempPath(), $"atlas_ftp_{Guid.NewGuid():N}.tar");
-                
-                // Verificar si wget está disponible
-                string wgetPath = GetWgetPath();
-                if (string.IsNullOrEmpty(wgetPath))
-                {
-                    LogMessage("❌ wget no encontrado. Instala Git Bash o Cygwin para usar FTP.", COLOR_ERROR);
-                    return false;
-                }
-                
-                // Descargar usando wget con opciones similares a Linux
-                bool downloadSuccess = await DownloadWithWgetResumable(url, tempTarPath, cancellationToken);
-                
-                if (!downloadSuccess)
-                {
-                    LogMessage("❌ Falló la descarga FTP", COLOR_ERROR);
-                    return false;
-                }
-                
-                // Extraer con 7-zip
-                LogMessage("🔧 Extrayendo archivo FTP con 7-zip...", COLOR_PRIMARY);
-                bool extractSuccess = await ExtractWith7Zip(tempTarPath, extractPath, cancellationToken);
-                
-                // Limpiar archivo temporal
-                try { File.Delete(tempTarPath); } catch { }
-                
-                return extractSuccess;
-            }
-            catch (Exception ex)
-            {
-                LogMessage($"❌ Error en descarga FTP: {ex.Message}", COLOR_ERROR);
-                return false;
-            }
-        }
-
-        // ========== MÉTODO PARA EXTRAER CON 7-ZIP ==========
-        // Método simplificado de extracción con buffer (en lugar de ExtractWith7ZipWithBuffer)
-        private async Task<bool> ExtractWith7Zip(string tarPath, string extractPath, CancellationToken cancellationToken)
-        {
-            return await Task.Run(() =>
-            {
-                try
-                {
-                    string sevenZipPath = Get7ZipPath();
-                    
-                    ProcessStartInfo psi = new ProcessStartInfo
-                    {
-                        FileName = $"\"{sevenZipPath}\"",
-                        Arguments = $"x \"{tarPath}\" -o\"{extractPath}\" -aoa -y",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    
-                    using (Process process = new Process())
-                    {
-                        process.StartInfo = psi;
-                        process.Start();
-                        process.WaitForExit(600000); // 10 minutos timeout
-                        
-                        return process.ExitCode == 0;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogMessage($"❌ Error extrayendo: {ex.Message}", COLOR_ERROR);
-                    return false;
-                }
-            });
-        }
-
 
         private async Task<bool> Install7ZipIfNeeded()
         {

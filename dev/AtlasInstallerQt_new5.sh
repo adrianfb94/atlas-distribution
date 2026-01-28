@@ -414,8 +414,6 @@ private:
     qint64 getPartialDownloadSize() const;
     bool promptForResume(qint64 partialSize);
     void showPartialDownloadInfo();
-    void cleanupInstallationTemp();
-
     
     // Componentes de UI
     QWidget *centralWidget;
@@ -464,7 +462,6 @@ private:
     }
 
 
-
 };
 
 #endif
@@ -509,33 +506,20 @@ class InstallWorker : public QObject {
     
 public:
     explicit InstallWorker(const QString &installDir, const QString &downloadMethod, 
-                        const QString &ftpUrl, const QString &driveId) 
+                         const QString &ftpUrl, const QString &driveId) 
         : m_installDir(installDir), m_downloadMethod(downloadMethod), 
-        m_ftpUrl(ftpUrl), m_driveId(driveId), 
-        m_canceled(false), m_downloadAttempts(0),
-        m_lastPartialSize(0), m_totalSize(20LL * 1024 * 1024 * 1024),
-        m_installationSuccess(false) 
-    {
-        // CAMBIO: Usar directorio de instalación para archivos temporales persistentes
-        QString tempDir = installDir + "/.temp_download";
-        QDir().mkpath(tempDir); // Crear directorio temporal si no existe
-
-        // IMPORTANTE: No eliminar archivos existentes al iniciar
-        m_tempArchive = tempDir + "/atlas_download.tmp";
-        qDebug() << "DEBUG: Archivo temporal en:" << m_tempArchive;
-
-        // Inicializar con el tamaño actual del archivo parcial
-        if (QFile::exists(m_tempArchive)) {
-            m_lastPartialSize = QFileInfo(m_tempArchive).size();
-            qDebug() << "DEBUG: Archivo parcial existente de tamaño:" << m_lastPartialSize;
-        }
-        
-    }
+          m_ftpUrl(ftpUrl), m_driveId(driveId), 
+          m_canceled(false), m_downloadAttempts(0) {}
     
     ~InstallWorker() {
+        // NO eliminar automáticamente el archivo temporal para permitir reanudación
+        // Solo marcar como cancelado
         m_canceled = true;
+        
+        // Esperar un momento para que cualquier proceso termine
         QThread::msleep(100);
         
+        // Limpiar otros archivos temporales pero NO el principal
         QString tempDir = QDir::tempPath();
         if (!tempDir.isEmpty()) {
             QDir temp(tempDir);
@@ -552,6 +536,9 @@ public:
                     QFile::remove(filePath);
                 }
             }
+            
+            // DEJAR atlas_download.tmp para posibles reanudaciones futuras
+            // El usuario deberá limpiarlo manualmente si lo desea
         }
         
         emit logMessage(" Procesos limpiados, archivo temporal conservado para reanudación");
@@ -564,6 +551,7 @@ public slots:
             
             qDebug() << "Worker: Iniciando limpieza de procesos...";
             
+            // Terminar cualquier proceso pendiente
             QProcess killProcess;
             QStringList killCommands = {
                 "pkill -f \"wget.*atlas\"",
@@ -582,44 +570,16 @@ public slots:
             qDebug() << "Worker: Procesos terminados";
             
             emit logMessage("🛑 Procesos de descarga detenidos");
-            if (!m_tempArchive.isEmpty()) {
-                emit logMessage(" Archivo temporal conservado en: " + m_tempArchive);
-            }
+            emit logMessage(" Archivo temporal conservado en: " + m_tempArchive);
             emit logMessage("📝 Puedes reanudar la instalación más tarde");
         }
     }
 
+
     void doWork() {
-        m_installationSuccess = false;
         emit logMessage("Iniciando descarga de Atlas Interactivo...");
         emit logMessage("Esto puede tomar tiempo dependiendo de tu conexión.");
         
-        // ========== VERIFICAR ARCHIVO PARCIAL ANTES DE CUALQUIER COSA ==========
-        bool hasPartial = QFile::exists(m_tempArchive) && QFileInfo(m_tempArchive).size() > 1024;
-        
-        if (hasPartial) {
-            m_lastPartialSize = QFileInfo(m_tempArchive).size();
-            emit logMessage(QString("📊 Archivo parcial detectado: %1").arg(formatBytes(m_lastPartialSize)));
-            
-            // VERIFICACIÓN CRÍTICA: Si el archivo parcial es de Google Drive, podría ser HTML
-            QFile file(m_tempArchive);
-            if (file.open(QIODevice::ReadOnly)) {
-                QByteArray header = file.read(512); // Leer primeros 512 bytes
-                file.close();
-                
-                if (header.contains("<html") || header.contains("<!DOCTYPE") || 
-                    header.contains("Google Drive") || header.contains("Error 4")) {
-                    emit logMessage("❌ ARCHIVO PARCIAL CORRUPTO: Es una página HTML, no un TAR");
-                    emit logMessage("🗑️  Eliminando archivo corrupto...");
-                    QFile::remove(m_tempArchive);
-                    m_lastPartialSize = 0;
-                    hasPartial = false;
-                    emit logMessage("✅ Se descargará desde cero para evitar segmentation fault");
-                }
-            }
-        }
-
-
         // ========== INFORMAR MÉTODO DE DESCARGA ==========
         if (m_downloadMethod == "ftp") {
             emit logMessage("Método de descarga: FTP");
@@ -629,37 +589,30 @@ public slots:
             emit logMessage(" ID de Google Drive: " + m_driveId);
         }
         
+        // Crear archivo temporal para la descarga (.tar)
+        QString tempFilePath = QDir::tempPath() + "/atlas_download.tmp";
+        QFile tempFile(tempFilePath);
 
-        // CREAR DIRECTORIO TEMPORAL EN RUTA DE INSTALACIÓN
-        QString tempDir = m_installDir + "/.temp_download";
-        if (!QDir().mkpath(tempDir)) {
-            emit logMessage("❌ No se pudo crear directorio temporal en: " + tempDir);
-            emit workFinished(false, "Error al crear directorio temporal");
+        // Si ya existe un archivo parcial, informarlo
+        if (tempFile.exists()) {
+            qint64 existingSize = tempFile.size();
+            emit logMessage(QString("📊 Encontrado archivo parcial: %1 (%2)")
+                        .arg(tempFilePath).arg(formatBytes(existingSize)));
+            emit logMessage("  La descarga se reanudará desde donde quedó");
+        }
+
+        if (!tempFile.open(QIODevice::WriteOnly)) {
+
+            emit logMessage("❌ No se pudo crear archivo temporal");
+            emit workFinished(false, "Error al crear archivo temporal");
             return;
         }
+        m_tempArchive = tempFilePath;
+        tempFile.close();
         
-        // Usar archivo temporal EN LA RUTA DE INSTALACIÓN
-        m_tempArchive = tempDir + "/atlas_download.tmp";
-
-
-        // VERIFICAR ARCHIVO PARCIAL ANTES DE CUALQUIER COSA
-        qint64 existingSize = 0;
-        if (QFile::exists(m_tempArchive)) {
-            existingSize = QFileInfo(m_tempArchive).size();
-            m_lastPartialSize = existingSize;
-            
-            if (existingSize > 1024) {
-                // Calcular progreso inicial
-                int initialPercent = qMin(50, static_cast<int>((existingSize * 50) / m_totalSize));
-                emit logMessage(QString("📊 Encontrado archivo parcial: %1 (%2% del proceso de descarga)")
-                            .arg(formatBytes(existingSize)).arg(initialPercent));
-                emit logMessage("  La descarga se reanudará desde donde quedó");
-                
-                // Actualizar progreso inmediatamente
-                emit progressUpdated(initialPercent, QString("Reanudando desde %1").arg(formatBytes(existingSize)));
-            }
-        }
-
+        emit progressUpdated(5, "Preparando descarga...");
+        emit logMessage("Archivo temporal: " + m_tempArchive);
+        
         // ========== OBTENER URL DE DESCARGA SEGÚN MÉTODO ==========
         QString downloadUrl;
         if (m_downloadMethod == "ftp") {
@@ -677,14 +630,6 @@ public slots:
         // Descarga con reintentos y resumible
         if (!downloadWithRetries(downloadUrl, m_tempArchive, 3)) {
             emit logMessage("❌ Falló la descarga después de varios intentos");
-            
-            // Verificar si hay un archivo parcial para reanudación
-            if (QFile::exists(m_tempArchive)) {
-                qint64 currentSize = QFileInfo(m_tempArchive).size();
-                emit logMessage(QString("📊 Progreso guardado: %1").arg(formatBytes(currentSize)));
-                emit logMessage("🔄 La próxima ejecución reanudará desde este punto");
-            }
-            
             emit workFinished(false, "No se pudo descargar el archivo. Verifica tu conexión a internet.");
             return;
         }
@@ -698,71 +643,22 @@ public slots:
         }
         
         emit logMessage(QString("✅ Descarga completada: %1 bytes").arg(fileInfo.size()));
+        emit progressUpdated(50, "Descarga completada");
         
-        // ========== VERIFICACIÓN CRÍTICA: Asegurar que no sea HTML ==========
-        QFile checkFile(m_tempArchive);
-        if (checkFile.open(QIODevice::ReadOnly)) {
-            QByteArray header = checkFile.read(512);
-            checkFile.close();
-            
-            if (header.contains("<html") || header.contains("<!DOCTYPE")) {
-                emit logMessage("❌ ERROR CRÍTICO: Se descargó HTML en lugar del TAR");
-                emit logMessage("   Esto causa segmentation fault al extraer");
-                QFile::remove(m_tempArchive);
-                emit workFinished(false, "Google Drive devolvió página HTML. Intenta con --use-ftp");
-                return;
-            }
-            
-            // Verificar que sea un TAR válido (firma "ustar")
-            if (header.size() > 257) {
-                QByteArray tarSignature = header.mid(257, 6);
-                if (tarSignature == "ustar " || tarSignature == "ustar\0") {
-                    emit logMessage("✅ Archivo TAR verificado (firma ustar encontrada)");
-                } else {
-                    emit logMessage("⚠️  Advertencia: No se encontró firma TAR estándar");
-                }
-            }
-        }
-        
-        emit progressUpdated(50, "Descarga completada y verificada");
-        
-        // Resto del código de extracción...
-
+        // Extraer archivos
         emit progressUpdated(60, "Extrayendo archivos...");
         emit logMessage("Extrayendo archivo .tar en grupos...");
         
-        // ========== SOLO VERIFICAR SI ES UN .tar VÁLIDO AL FINAL ==========
-        emit logMessage("🔍 Verificando integridad del archivo TAR...");
-        QProcess testTar;
-        testTar.start("tar", QStringList() << "-tf" << m_tempArchive);
-
-        if (!testTar.waitForFinished(30000) || testTar.exitCode() != 0) {
-            emit logMessage("❌ ERROR: El archivo TAR está corrupto o incompleto");
-            emit logMessage("   Esto puede causar segmentation fault al extraer");
-            
-            // Mantener el archivo temporal para reanudación
-            if (QFile::exists(m_tempArchive)) {
-                qint64 currentSize = QFileInfo(m_tempArchive).size();
-                emit logMessage(QString("📊 Progreso guardado: %1").arg(formatBytes(currentSize)));
-                emit logMessage("🔄 La próxima ejecución reanudará desde este punto");
-            }
-            
-            emit workFinished(false, "Archivo TAR incompleto o corrupto. Se guardó el progreso para reanudar.");
-            return;
-        }
-
-        QString testOutput = QString::fromUtf8(testTar.readAllStandardOutput());
-        QStringList files = testOutput.split('\n', Qt::SkipEmptyParts);
-        emit logMessage(QString("✅ TAR verificado: %1 archivos listados").arg(files.size()));
-
         bool extractionSuccess = false;
         
+        // Primero intentar extracción incremental
         if (extractArchiveIncremental(m_tempArchive, m_installDir)) {
             extractionSuccess = true;
         } else {
             emit logMessage("⚠️  Extracción incremental falló, intentando método simple...");
             emit logMessage("📊 Tamaño del archivo: " + formatBytes(QFileInfo(m_tempArchive).size()));
             
+            // Intentar método simple
             if (extractArchiveSimple(m_tempArchive, m_installDir)) {
                 extractionSuccess = true;
             } else {
@@ -772,6 +668,7 @@ public slots:
             }
         }
 
+        // Verificar que se extrajeron archivos
         QDir installDir(m_installDir);
         QStringList extractedFiles = installDir.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
         
@@ -783,68 +680,23 @@ public slots:
         
         emit logMessage(QString("✅ Extraídos %1 archivos/directorios").arg(extractedFiles.size()));
         
+        // Hacer ejecutable el binario principal si existe
         QString executable = m_installDir + "/Atlas_Interactivo";
         if (QFile::exists(executable)) {
             QProcess chmodProcess;
             chmodProcess.start("chmod", QStringList() << "+x" << executable);
             chmodProcess.waitForFinished();
             emit logMessage("✅ Binario hecho ejecutable");
-            
-            // ========== VERIFICACIÓN FINAL: Comprobar que el ejecutable no cause segmentation fault ==========
-            emit logMessage("🔍 Verificando que el ejecutable sea válido...");
-            
-            // Verificar con el comando 'file'
-            QProcess fileProcess;
-            fileProcess.start("file", QStringList() << executable);
-            fileProcess.waitForFinished();
-            
-            QString fileOutput = QString::fromUtf8(fileProcess.readAllStandardOutput());
-            if (fileOutput.contains("ELF") && fileOutput.contains("executable")) {
-                emit logMessage("✅ Ejecutable verificado: " + fileOutput.trimmed());
-            } else {
-                emit logMessage("❌ ERROR: El ejecutable NO es un binario ELF válido");
-                emit logMessage("   Esto causará segmentation fault al ejecutar");
-                emit logMessage("   Salida de 'file': " + fileOutput);
-                
-                // Intentar reparación automática
-                emit logMessage("🛠️  Intentando reparar...");
-                QFile::remove(executable);
-                
-                // Re-extraer solo el ejecutable
-                QProcess tarExtract;
-                tarExtract.start("tar", QStringList() << "-xf" << m_tempArchive 
-                    << "-C" << m_installDir << "Atlas_Interactivo");
-                tarExtract.waitForFinished();
-                
-                if (QFile::exists(executable)) {
-                    emit logMessage("✅ Ejecutable re-extraído");
-                } else {
-                    emit logMessage("❌ No se pudo re-extraer el ejecutable");
-                }
-            }
-        } else {
-            emit logMessage("❌ ERROR: No se encontró el ejecutable Atlas_Interactivo");
-            emit logMessage("   La extracción falló completamente");
         }
         
+        // Crear archivo de versión
         createVersionFile();
         
-        // Limpiar archivo temporal solo si la instalación fue exitosa
-        if (extractionSuccess) {
-            // NO limpiar el directorio temporal, solo el archivo
-            if (!m_tempArchive.isEmpty() && QFile::exists(m_tempArchive)) {
-                QFile::remove(m_tempArchive);
-            }
-            
-            // NO eliminar el directorio tmp de la instalación
-            // QString tempDir = m_installDir + "/.temp_download";
-            // QDir(tempDir).removeRecursively(); // <-- NO HACER ESTO
-            
-            m_tempArchive.clear();
-            emit logMessage("✅ Archivo temporal eliminado");
-        }
-
+        // Limpiar archivo temporal
+        QFile::remove(m_tempArchive);
+        m_tempArchive.clear();
         
+        // Sincronizar para liberar espacio
         QProcess syncProcess;
         syncProcess.start("sync", QStringList());
         syncProcess.waitForFinished();
@@ -861,7 +713,7 @@ public slots:
     
 private:
     QString getDirectDownloadUrl() {
-        bool useLocal = false;
+        bool useLocal = false; // Cambiar a false para usar Google Drive real
         
         if (useLocal) {
             emit logMessage("🔧 USANDO SERVIDOR LOCAL para pruebas");
@@ -870,6 +722,7 @@ private:
             emit logMessage("Descargando desde Google Drive...");
             QString baseUrl = QString("https://drive.google.com/uc?id=%1&export=download").arg(m_driveId);
             
+            // Intentar obtener el token de confirmación para archivos grandes
             QProcess wgetProcess;
             QStringList wgetArgs;
             wgetArgs << "--no-check-certificate";
@@ -881,14 +734,16 @@ private:
             wgetProcess.start("wget", wgetArgs);
             wgetProcess.waitForFinished(10000);
             
-            QString confirmToken;
+            // Leer la respuesta para buscar el token confirm
             QFile responseFile("/tmp/gdrive_response.html");
+            QString confirmToken;
             
             if (responseFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
                 QTextStream in(&responseFile);
                 QString content = in.readAll();
                 responseFile.close();
                 
+                // Buscar el token de confirmación
                 QRegularExpression re("confirm=([0-9A-Za-z_-]+)");
                 QRegularExpressionMatch match = re.match(content);
                 if (match.hasMatch()) {
@@ -899,12 +754,14 @@ private:
                     emit logMessage("⚠️  Usando token de confirmación por defecto");
                 }
             } else {
-                confirmToken = "t";
+                confirmToken = "t"; // Fallback
             }
             
+            // Construir URL con token de confirmación
             QString finalUrl = QString("https://drive.google.com/uc?id=%1&export=download&confirm=%2")
                                 .arg(m_driveId).arg(confirmToken);
             
+            // Limpiar archivos temporales
             QFile::remove("/tmp/cookies.txt");
             QFile::remove("/tmp/gdrive_response.html");
             
@@ -912,184 +769,85 @@ private:
         }
     }
 
-    // ========== MÉTODO DE DESCARGA FTP MEJORADO ==========
-    bool downloadWithFtp(const QString &url, const QString &outputPath) {
-        emit logMessage("📥 Iniciando descarga FTP desde: " + url);
 
-        QString finalOutputPath = outputPath;
+    bool extractArchiveSimple(const QString &archivePath, const QString &outputDir) {
+        emit logMessage("  Extrayendo archivo completo (método simple)...");
         
-        emit logMessage("📂 Archivo temporal: " + finalOutputPath);
+        QProcess tarProcess;
+        QStringList tarArgs;
+        tarArgs << "-xf" << archivePath;
+        tarArgs << "-C" << outputDir;
         
-        // VERIFICAR ARCHIVO PARCIAL
-        qint64 existingSize = 0;
-        bool hasPartialDownload = false;
+        // Intentar con strip-components primero
+        tarArgs << "--strip-components=0";
         
-        if (QFile::exists(finalOutputPath)) {
-            existingSize = QFileInfo(finalOutputPath).size();
-            hasPartialDownload = (existingSize > 1024);
-            
-            if (hasPartialDownload) {
-                emit logMessage(QString("✅ Archivo parcial encontrado: %1")
-                            .arg(formatBytes(existingSize)));
-                emit logMessage("  Reanudando descarga...");
-            }
-        }
+        emit logMessage("💻 Comando: tar " + tarArgs.join(" "));
         
-        QProcess wgetProcess;
-        QStringList wgetArgs;
+        QElapsedTimer timer;
+        timer.start();
         
-        // PARÁMETROS PARA REANUDACIÓN - CRÍTICO: usar -c (continue)
-        wgetArgs << "-c";  // Continuar descarga - ESTE ES EL PARÁMETRO MÁS IMPORTANTE
-        wgetArgs << "-O" << finalOutputPath;
-        wgetArgs << "--tries=3";
-        wgetArgs << "--timeout=60";
-        wgetArgs << "--waitretry=10";
-        wgetArgs << "--retry-connrefused";
-        wgetArgs << url;
+        tarProcess.start("tar", tarArgs);
         
-        emit logMessage("💻 Comando wget: wget " + wgetArgs.join(" "));
-        
-        wgetProcess.start("wget", wgetArgs);
-        
-        if (!wgetProcess.waitForStarted()) {
-            emit logMessage("❌ wget no pudo iniciarse para FTP");
+        if (!tarProcess.waitForFinished(300000)) { // 5 minutos timeout
+            emit logMessage("❌ Timeout extrayendo archivo");
             return false;
         }
         
-        QEventLoop loop;
-        QTimer timer;
-        timer.setSingleShot(true);
-        
-        qint64 lastReportedSize = existingSize;
-        int lastPercent = 0;
-        QTime lastUpdateTime = QTime::currentTime();
-        
-        // Conectar para leer salida de error (progreso)
-        connect(&wgetProcess, &QProcess::readyReadStandardError, this, 
-            [this, &wgetProcess, finalOutputPath, &lastReportedSize, &lastPercent, &lastUpdateTime, existingSize]() {
-            QString output = QString::fromUtf8(wgetProcess.readAllStandardError());
+        if (tarProcess.exitCode() != 0) {
+            QString error = QString::fromUtf8(tarProcess.readAllStandardError());
+            emit logMessage("❌ Error en tar (método simple):");
+            emit logMessage("   " + error.left(200));
             
-            if (!output.trimmed().isEmpty()) {
-                // Detectar si wget está reanudando
-                if (output.contains("Resuming") || output.contains("reuse")) {
-                    emit logMessage("✅ Reanudando descarga desde punto guardado");
-                }
-                
-                // Extraer porcentaje de progreso
-                QRegularExpression percentRe(R"((\d+)%)");
-                QRegularExpressionMatchIterator percentMatches = percentRe.globalMatch(output);
-                
-                while (percentMatches.hasNext()) {
-                    QRegularExpressionMatch percentMatch = percentMatches.next();
-                    int percent = percentMatch.captured(1).toInt();
-                    
-                    // Calcular progreso real considerando descarga parcial
-                    int realPercent = qMin(50, percent); // Máximo 50% para fase de descarga
-                    
-                    if (realPercent > lastPercent) {
-                        // Obtener tamaño actual del archivo
-                        if (QFile::exists(finalOutputPath)) {
-                            qint64 currentSize = QFileInfo(finalOutputPath).size();
-                            
-                            // Calcular velocidad si ha pasado suficiente tiempo
-                            QTime now = QTime::currentTime();
-                            int elapsedMs = lastUpdateTime.msecsTo(now);
-                            
-                            if (elapsedMs > 1000 && currentSize > lastReportedSize) {
-                                double speed = (currentSize - lastReportedSize) / (elapsedMs / 1000.0);
-                                QString speedStr = formatSpeed(speed);
-                                QString statusMessage = QString("Descargando: %1% (%2)").arg(realPercent).arg(speedStr);
-                                emit progressUpdated(realPercent, statusMessage);
-                                
-                                // Actualizar cada 5MB de progreso
-                                if (currentSize - lastReportedSize > (5 * 1024 * 1024)) {
-                                    emit logMessage(QString("📊 Progreso: %1").arg(formatBytes(currentSize)));
-                                    lastReportedSize = currentSize;
-                                }
-                            } else {
-                                emit progressUpdated(realPercent, QString("Descargando: %1%").arg(realPercent));
-                            }
-                            
-                            lastUpdateTime = now;
-                        }
-                        lastPercent = realPercent;
-                    }
-                }
-            }
-        });
-
-        // Conectar para leer salida estándar (información del archivo)
-        connect(&wgetProcess, &QProcess::readyReadStandardOutput, this, 
-            [this, &wgetProcess, finalOutputPath, hasPartialDownload, existingSize]() {
-            QString output = QString::fromUtf8(wgetProcess.readAllStandardOutput());
-            if (!output.trimmed().isEmpty()) {
-                // Detectar información de tamaño
-                QRegularExpression infoRe(R"(Length:\s+(\d+)\s+\((\d+)([KM]?B?)\))");
-                QRegularExpressionMatch infoMatch = infoRe.match(output);
-                if (infoMatch.hasMatch()) {
-                    QString totalSize = infoMatch.captured(1);
-                    m_totalSize = totalSize.toLongLong();
-                    QString humanSize = infoMatch.captured(2) + infoMatch.captured(3);
-                    
-                    // Si hay descarga parcial, calcular progreso real
-                    if (hasPartialDownload && existingSize > 0 && m_totalSize > 0) {
-                        int actualPercent = static_cast<int>((existingSize * 100) / m_totalSize);
-                        emit logMessage(QString("📏 Tamaño total: %1 (%2 bytes)").arg(humanSize).arg(totalSize));
-                        emit logMessage(QString("🔍 Progreso al reanudar: %1%").arg(qMin(100, actualPercent)));
-                    } else {
-                        emit logMessage(QString("📏 Tamaño total: %1 (%2 bytes)").arg(humanSize).arg(totalSize));
-                    }
-                }
-            }
-        });
-        
-        // Conectar señal de finalización
-        connect(&wgetProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-                &loop, &QEventLoop::quit);
-        
-        connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-        timer.start(7200000); // 2 horas máximo
-        
-        loop.exec();
-        
-        // Verificar resultado
-        if (wgetProcess.exitCode() != 0 && !m_canceled) {
-            QString error = QString::fromUtf8(wgetProcess.readAllStandardError());
-            emit logMessage(QString("❌ wget falló con código: %1").arg(wgetProcess.exitCode()));
+            // Intentar método alternativo sin strip-components
+            emit logMessage("  Intentando método alternativo...");
+            QProcess tarProcess2;
+            tarProcess2.start("tar", QStringList() 
+                << "-xf" << archivePath
+                << "-C" << outputDir);
             
-            if (!error.isEmpty()) {
-                emit logMessage("Detalles: " + error.left(200));
-            }
-            
-            // Informar sobre el estado de la descarga parcial
-            if (QFile::exists(finalOutputPath)) {
-                qint64 currentSize = QFileInfo(finalOutputPath).size();
-                emit logMessage(QString("📊 Progreso guardado: %1").arg(formatBytes(currentSize)));
-                emit logMessage("🔄 Puedes reanudar más tarde");
-            }
-            
-            return false;
-        }
-        
-        if (QFile::exists(finalOutputPath)) {
-            QFileInfo fileInfo(finalOutputPath);
-            qint64 size = fileInfo.size();
-            
-            if (size > 0) {
-                emit logMessage(QString("✅ Descarga FTP completada: %1 (%2 bytes)")
-                            .arg(formatBytes(size)).arg(size));
-                return true;
-            } else {
-                emit logMessage("❌ Archivo FTP descargado está vacío");
-                QFile::remove(finalOutputPath);
+            if (!tarProcess2.waitForFinished(300000)) {
+                emit logMessage("❌ Falló método alternativo también");
                 return false;
             }
+            
+            if (tarProcess2.exitCode() != 0) {
+                QString error2 = QString::fromUtf8(tarProcess2.readAllStandardError());
+                emit logMessage("❌ Error método alternativo: " + error2.left(200));
+                return false;
+            }
+            
+            emit logMessage("✅ Extracción exitosa con método alternativo");
         } else {
-            emit logMessage("❌ No se pudo descargar el archivo FTP");
+            emit logMessage(QString("✅ Extracción completada en %1 ms").arg(timer.elapsed()));
+        }
+        
+        // Verificar contenido extraído
+        QDir outputDirObj(outputDir);
+        QStringList extractedItems = outputDirObj.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+        
+        if (extractedItems.isEmpty()) {
+            emit logMessage("⚠️  No se encontraron archivos extraídos");
             return false;
         }
+        
+        emit logMessage(QString("📊 Total extraído: %1 archivos/directorios").arg(extractedItems.size()));
+        
+        // Reorganizar si es necesario
+        QStringList possibleDirs = {"Atlas_Interactivo-1.0.0-linux-x64", "Atlas_Interactivo"};
+        foreach (const QString &dirName, possibleDirs) {
+            QString dirPath = outputDir + "/" + dirName;
+            if (QDir(dirPath).exists()) {
+                emit logMessage("  Reorganizando desde: " + dirName);
+                if (reorganizeExtractedFiles(outputDir, dirName)) {
+                    emit logMessage("✅ Reorganización completada");
+                }
+                break;
+            }
+        }
+        
+        return true;
     }
-    
+
     bool downloadWithRetries(const QString &url, const QString &outputPath, int maxAttempts) {
         m_downloadAttempts = 0;
         
@@ -1105,6 +863,7 @@ private:
             m_downloadAttempts++;
             emit logMessage(QString("  Intento de descarga %1/%2...").arg(m_downloadAttempts).arg(maxAttempts));
             
+            // ========== USAR MÉTODO ADECUADO ==========
             bool success = false;
             if (m_downloadMethod == "ftp") {
                 success = downloadWithFtp(url, outputPath);
@@ -1133,39 +892,217 @@ private:
         return false;
     }
     
-    QString formatSpeed(double bytesPerSecond) {
-        const double KB = 1024;
-        const double MB = KB * 1024;
-        const double GB = MB * 1024;
+
+
+
+
+
+
+    // ========== NUEVO MÉTODO PARA DESCARGA FTP ==========
+    bool downloadWithFtp(const QString &url, const QString &outputPath) {
+        emit logMessage("📥 Iniciando descarga FTP desde: " + url);
+
+        // USAR SOLO UN NOMBRE FIJO PARA REANUDACIÓN
+        QString finalOutputPath = QDir::tempPath() + "/atlas_download.tmp";
         
-        if (bytesPerSecond >= GB) {
-            return QString("%1 GB/s").arg(QString::number(bytesPerSecond / GB, 'f', 2));
-        } else if (bytesPerSecond >= MB) {
-            return QString("%1 MB/s").arg(QString::number(bytesPerSecond / MB, 'f', 2));
-        } else if (bytesPerSecond >= KB) {
-            return QString("%1 KB/s").arg(QString::number(bytesPerSecond / KB, 'f', 2));
+        emit logMessage("📂 Archivo temporal fijo: " + finalOutputPath);
+        
+        // VERIFICAR SI YA EXISTE DESCARGA PARCIAL
+        qint64 existingSize = 0;
+        bool hasPartialDownload = false;
+        
+        if (QFile::exists(finalOutputPath)) {
+            existingSize = QFileInfo(finalOutputPath).size();
+            hasPartialDownload = (existingSize > 1024); // Más de 1KB
+            
+            if (hasPartialDownload) {
+                emit logMessage(QString("✅ Archivo de reanudación encontrado: %1 (%2)")
+                            .arg(finalOutputPath).arg(formatBytes(existingSize)));
+                
+                // Mostrar información detallada
+                QFileInfo fileInfo(finalOutputPath);
+                QString lastModified = fileInfo.lastModified().toString("yyyy-MM-dd hh:mm");
+                emit logMessage(QString("📅 Última modificación: %1").arg(lastModified));
+                
+                if (existingSize > 0) {
+                    // Calcular progreso inicial aproximado (asumiendo 20GB total)
+                    qint64 estimatedTotal = 20LL * 1024 * 1024 * 1024;
+                    int initialPercent = qMin(45, static_cast<int>((existingSize * 45) / estimatedTotal));
+                    
+                    emit logMessage(QString("🔧 La descarga se reanudará desde: %1 (%2% aproximadamente)")
+                                .arg(formatBytes(existingSize)).arg(initialPercent));
+                    
+                    emit progressUpdated(initialPercent, "Reanudando descarga previa...");
+                }
+            }
+        }
+        
+        QProcess wgetProcess;
+        QStringList wgetArgs;
+        
+        // PARÁMETROS PARA REANUDACIÓN
+        wgetArgs << "--no-passive-ftp";
+        wgetArgs << "-c";  // CRÍTICO: reanudar
+        wgetArgs << "--progress=dot:giga";
+        wgetArgs << "-O" << finalOutputPath;
+        wgetArgs << "--tries=3";
+        wgetArgs << "--timeout=60";
+        wgetArgs << "--waitretry=10";
+        wgetArgs << "--retry-connrefused";
+        
+        // Si existe descarga parcial, wget automáticamente reanudará desde existingSize
+        wgetArgs << url;
+        
+        emit logMessage("💻 Comando wget: wget " + wgetArgs.join(" "));
+        
+        wgetProcess.start("wget", wgetArgs);
+        
+        if (!wgetProcess.waitForStarted()) {
+            emit logMessage("❌ wget no pudo iniciarse para FTP");
+            return false;
+        }
+        
+        QEventLoop loop;
+        QTimer timer;
+        timer.setSingleShot(true);
+        
+        qint64 lastReportedSize = existingSize;
+        int lastReportedPercent = 0;
+        
+        connect(&wgetProcess, &QProcess::readyReadStandardError, this, [this, &wgetProcess, finalOutputPath, 
+                                                                    hasPartialDownload, existingSize, &lastReportedSize, &lastReportedPercent]() {
+            QString output = QString::fromUtf8(wgetProcess.readAllStandardError());
+            
+            if (!output.trimmed().isEmpty()) {
+                // Manejar diferentes formatos de progreso
+                QRegularExpression percentRe(R"((\d+)%)");
+                QRegularExpressionMatchIterator percentMatches = percentRe.globalMatch(output);
+                
+                while (percentMatches.hasNext()) {
+                    QRegularExpressionMatch percentMatch = percentMatches.next();
+                    int percent = percentMatch.captured(1).toInt();
+                    
+                    // Ajustar porcentaje si hay descarga parcial
+                    if (hasPartialDownload && existingSize > 0) {
+                        // Asumir que el porcentaje de wget es del archivo completo
+                        // Mantener el cálculo simple por ahora
+                        int adjustedPercent = qMin(45, percent); // Máximo 45% para fase de descarga
+                        
+                        if (adjustedPercent > lastReportedPercent) {
+                            QString statusMessage = QString("Descargando FTP: %1%").arg(adjustedPercent);
+                            emit progressUpdated(adjustedPercent, statusMessage);
+                            lastReportedPercent = adjustedPercent;
+                        }
+                    } else {
+                        int progress = qMin(45, percent); // Máximo 45% para fase de descarga
+                        QString statusMessage = QString("Descargando FTP: %1%").arg(percent);
+                        emit progressUpdated(progress, statusMessage);
+                        lastReportedPercent = percent;
+                    }
+                    
+                    // Mostrar tamaño actual del archivo
+                    if (QFile::exists(finalOutputPath)) {
+                        qint64 currentSize = QFileInfo(finalOutputPath).size();
+                        if (currentSize > lastReportedSize + (10 * 1024 * 1024)) { // Cada 10MB
+                            emit logMessage(QString("📊 FTP: %1 descargados").arg(formatBytes(currentSize)));
+                            lastReportedSize = currentSize;
+                        }
+                    }
+                }
+                
+                // Mostrar mensajes informativos
+                if (output.contains("Resuming")) {
+                    emit logMessage("  ✅ Reanudando descarga desde punto guardado...");
+                } else if (output.contains("retry")) {
+                    emit logMessage("  🔄 Reintentando conexión...");
+                }
+            }
+        });
+
+        // Manejar salida estándar para obtener tamaño total
+        connect(&wgetProcess, &QProcess::readyReadStandardOutput, this, [this, &wgetProcess, hasPartialDownload, existingSize]() {
+            QString output = QString::fromUtf8(wgetProcess.readAllStandardOutput());
+            if (!output.trimmed().isEmpty()) {
+                // Detectar información de tamaño
+                QRegularExpression infoRe(R"(Length:\s+(\d+)\s+\((\d+)([KM]?B?)\))");
+                QRegularExpressionMatch infoMatch = infoRe.match(output);
+                if (infoMatch.hasMatch()) {
+                    QString totalSize = infoMatch.captured(1);
+                    QString humanSize = infoMatch.captured(2) + infoMatch.captured(3);
+                    emit logMessage(QString("📏 Tamaño total del archivo FTP: %1 (%2 bytes)")
+                                .arg(humanSize).arg(totalSize));
+                    
+                    // Si hay descarga parcial, calcular progreso real
+                    if (hasPartialDownload && existingSize > 0) {
+                        qint64 totalBytes = totalSize.toLongLong();
+                        if (totalBytes > 0) {
+                            int actualPercent = static_cast<int>((existingSize * 100) / totalBytes);
+                            emit logMessage(QString("🔍 Progreso real al reanudar: %1%").arg(qMin(100, actualPercent)));
+                        }
+                    }
+                }
+                
+                // Detectar reanudación
+                if (output.contains("resuming at")) {
+                    emit logMessage("✅ Descarga reanudada desde punto anterior");
+                }
+            }
+        });
+        
+        connect(&wgetProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                &loop, &QEventLoop::quit);
+        
+        connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+        timer.start(7200000); // 2 horas máximo
+        
+        loop.exec();
+        
+        // AL FINAL: Copiar al outputPath si es necesario
+        if (outputPath != finalOutputPath && QFile::exists(finalOutputPath)) {
+            // Solo copiar si la descarga fue exitosa
+            QFile::copy(finalOutputPath, outputPath);
+            m_tempArchive = outputPath;
+            emit logMessage("📋 Archivo copiado a ubicación temporal solicitada");
         } else {
-            return QString("%1 B/s").arg(static_cast<int>(bytesPerSecond));
+            m_tempArchive = finalOutputPath;
+        }
+        
+        if (wgetProcess.exitCode() != 0 && !m_canceled) {
+            QString error = QString::fromUtf8(wgetProcess.readAllStandardError());
+            emit logMessage(QString("❌ wget FTP falló con código: %1").arg(wgetProcess.exitCode()));
+            if (!error.isEmpty()) {
+                emit logMessage("Detalles: " + error.left(200));
+            }
+            
+            // Informar sobre el estado de la descarga parcial
+            if (QFile::exists(m_tempArchive)) {
+                qint64 currentSize = QFileInfo(m_tempArchive).size();
+                emit logMessage(QString("📊 Progreso guardado: %1").arg(formatBytes(currentSize)));
+                emit logMessage("🔄 Puedes reanudar más tarde");
+            }
+            
+            return false;
+        }
+        
+        if (QFile::exists(m_tempArchive)) {
+            QFileInfo fileInfo(m_tempArchive);
+            qint64 size = fileInfo.size();
+            
+            if (size > 0) {
+                emit logMessage(QString("✅ Descarga FTP completada: %1 (%2 bytes)")
+                            .arg(formatBytes(size)).arg(size));
+                return true;
+            } else {
+                emit logMessage("❌ Archivo FTP descargado está vacío");
+                QFile::remove(m_tempArchive);
+                return false;
+            }
+        } else {
+            emit logMessage("❌ No se pudo descargar el archivo FTP");
+            return false;
         }
     }
     
-    QString formatBytes(qint64 bytes) {
-        const qint64 KB = 1024;
-        const qint64 MB = KB * 1024;
-        const qint64 GB = MB * 1024;
-        
-        if (bytes >= GB) {
-            return QString("%1 GB").arg(QString::number(bytes / (double)GB, 'f', 2));
-        } else if (bytes >= MB) {
-            return QString("%1 MB").arg(QString::number(bytes / (double)MB, 'f', 2));
-        } else if (bytes >= KB) {
-            return QString("%1 KB").arg(QString::number(bytes / (double)KB, 'f', 2));
-        } else {
-            return QString("%1 bytes").arg(bytes);
-        }
-    }
-    
-    // Métodos para descarga desde Google Drive
     bool downloadWithWgetResumable(const QString &url, const QString &outputPath) {
         if (url.contains("localhost") || url.contains("127.0.0.1") || url.startsWith("file://")) {
             emit logMessage("Usando modo local - descarga directa");
@@ -1173,7 +1110,6 @@ private:
             QProcess wgetProcess;
             QStringList wgetArgs;
             wgetArgs << "--no-check-certificate";
-            wgetArgs << "-c";  // CRÍTICO: reanudar
             wgetArgs << "--progress=bar:force:noscroll";
             wgetArgs << "-O" << outputPath;
             wgetArgs << "--tries=3";
@@ -1196,6 +1132,7 @@ private:
                 QString output = QString::fromUtf8(wgetProcess.readAllStandardError());
                 
                 if (!output.trimmed().isEmpty()) {
+                    // Patrón para extraer porcentaje
                     QRegularExpression percentRe(R"((\d+)%)");
                     QRegularExpressionMatchIterator percentMatches = percentRe.globalMatch(output);
                     
@@ -1204,6 +1141,7 @@ private:
                         int percent = percentMatch.captured(1).toInt();
                         int progress = 5 + (percent * 0.45);
                         
+                        // Patrón para extraer tamaño y velocidad (formato wget)
                         QRegularExpression sizeRe(R"((\d+(?:\.\d+)?)([KM]?) +.*?(\d+(?:\.\d+)?)([KM]?)B/s.*?(\d+:\d+))");
                         QRegularExpressionMatch sizeMatch = sizeRe.match(output);
                         
@@ -1214,6 +1152,7 @@ private:
                             QString eta = sizeMatch.captured(5);
                             statusMessage = QString("Descargando: %1% (%2 a %3/s) - ETA: %4").arg(percent).arg(downloaded).arg(speed).arg(eta);
                         } else {
+                            // Patrón alternativo sin ETA
                             QRegularExpression simpleSizeRe(R"((\d+(?:\.\d+)?)([KM]?) +.*?(\d+(?:\.\d+)?)([KM]?)B/s)");
                             QRegularExpressionMatch simpleMatch = simpleSizeRe.match(output);
                             
@@ -1296,9 +1235,6 @@ private:
         QString htmlFile = "/tmp/gdrive_" + fileId + ".html";
         QString cookiesFile = "/tmp/gdrive_cookies_" + fileId + ".txt";
         
-        // Verificar si ya existe archivo parcial
-        bool hasPartial = QFile::exists(outputPath) && QFileInfo(outputPath).size() > 1024;
-        
         QProcess getPageProcess;
         QStringList getPageArgs;
         getPageArgs << "--no-check-certificate";
@@ -1348,7 +1284,7 @@ private:
         wgetArgs << "--no-check-certificate";
         wgetArgs << "--load-cookies" << cookiesFile;
         wgetArgs << "--progress=bar:force:noscroll";
-        wgetArgs << "-c";  // CRÍTICO: reanudar
+        wgetArgs << "-c";
         wgetArgs << "-O" << outputPath;
         wgetArgs << "--tries=3";
         wgetArgs << "--timeout=30";
@@ -1356,12 +1292,6 @@ private:
         wgetArgs << downloadUrl;
         
         wgetArgs << "--header=User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36";
-        
-        // Si hay descarga parcial, informar al usuario
-        if (hasPartial) {
-            qint64 partialSize = QFileInfo(outputPath).size();
-            emit logMessage(QString("🔧 Reanudando descarga desde %1").arg(formatBytes(partialSize)));
-        }
         
         emit logMessage("📥 Iniciando descarga del archivo...");
         wgetProcess.start("wget", wgetArgs);
@@ -1377,15 +1307,10 @@ private:
         QTimer timer;
         timer.setSingleShot(true);
         
-        connect(&wgetProcess, &QProcess::readyReadStandardError, this, [this, &wgetProcess, outputPath]() {
+        connect(&wgetProcess, &QProcess::readyReadStandardError, this, [this, &wgetProcess]() {
             QString output = QString::fromUtf8(wgetProcess.readAllStandardError());
             
             if (!output.trimmed().isEmpty()) {
-                // Detectar reanudación
-                if (output.contains("Resuming")) {
-                    emit logMessage("✅ Reanudando descarga desde punto guardado");
-                }
-                
                 QRegularExpression percentRe(R"(\s+(\d+)%\[)");
                 QRegularExpressionMatch percentMatch = percentRe.match(output);
                 
@@ -1416,27 +1341,15 @@ private:
             }
         });
 
-        connect(&wgetProcess, &QProcess::readyReadStandardOutput, this, [this, &wgetProcess, outputPath]() {
+        connect(&wgetProcess, &QProcess::readyReadStandardOutput, this, [this, &wgetProcess]() {
             QString output = QString::fromUtf8(wgetProcess.readAllStandardOutput());
             if (!output.trimmed().isEmpty()) {
                 QRegularExpression infoRe(R"(Length:\s+(\d+)\s+\((\d+)([KM]?)\))");
                 QRegularExpressionMatch infoMatch = infoRe.match(output);
                 if (infoMatch.hasMatch()) {
                     QString totalSize = infoMatch.captured(1);
-                    m_totalSize = totalSize.toLongLong();
                     QString humanSize = infoMatch.captured(2) + infoMatch.captured(3);
-                    
-                    // Verificar si hay archivo parcial
-                    if (QFile::exists(outputPath)) {
-                        qint64 partialSize = QFileInfo(outputPath).size();
-                        if (partialSize > 1024 && m_totalSize > 0) {
-                            int actualPercent = static_cast<int>((partialSize * 100) / m_totalSize);
-                            emit logMessage(QString(" Tamaño total del archivo: %1 (%2 bytes)").arg(humanSize).arg(totalSize));
-                            emit logMessage(QString("🔍 Progreso al reanudar: %1%").arg(qMin(100, actualPercent)));
-                        } else {
-                            emit logMessage(QString(" Tamaño total del archivo: %1 (%2 bytes)").arg(humanSize).arg(totalSize));
-                        }
-                    }
+                    emit logMessage(QString(" Tamaño total del archivo: %1 (%2 bytes)").arg(humanSize).arg(totalSize));
                 }
             }
         });
@@ -1461,7 +1374,6 @@ private:
             QFileInfo fileInfo(outputPath);
             qint64 size = fileInfo.size();
             
-            // Verificar que no sea un archivo HTML de error
             if (size < 10000) {
                 QFile checkFile(outputPath);
                 if (checkFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -1482,17 +1394,144 @@ private:
         
         return false;
     }
+
+
+    // Función auxiliar para ejecutar wget
+    bool runWgetProcess(QProcess &wgetProcess, const QStringList &args, const QString &source) {
+        emit logMessage("📥 Iniciando descarga desde " + source + "...");
+        emit logMessage("💻 Comando: wget " + args.join(" "));
+        
+        wgetProcess.start("wget", args);
+        
+        if (!wgetProcess.waitForStarted()) {
+            emit logMessage("❌ wget no pudo iniciarse");
+            return false;
+        }
+        
+        QEventLoop loop;
+        QTimer timer;
+        timer.setSingleShot(true);
+        
+        QString finalOutputPath = QDir::tempPath() + "/atlas_download.tmp";
+        
+        connect(&wgetProcess, &QProcess::readyReadStandardError, this, [this, &wgetProcess, finalOutputPath, source]() {
+            QString output = QString::fromUtf8(wgetProcess.readAllStandardError());
+            
+            if (!output.trimmed().isEmpty()) {
+                // Detectar reanudación
+                if (output.contains("Resuming")) {
+                    emit logMessage("✅ Reanudando descarga desde punto guardado");
+                }
+                
+                // Progreso simple
+                QRegularExpression percentRe(R"((\d+)%)");
+                QRegularExpressionMatchIterator percentMatches = percentRe.globalMatch(output);
+                
+                while (percentMatches.hasNext()) {
+                    QRegularExpressionMatch percentMatch = percentMatches.next();
+                    int percent = percentMatch.captured(1).toInt();
+                    int progress = 5 + (percent * 0.45);
+                    
+                    QString statusMessage = QString("Descargando %1: %2%").arg(source).arg(percent);
+                    emit progressUpdated(progress, statusMessage);
+                    
+                    // Log cada 10%
+                    static int lastLoggedPercent = 0;
+                    if (percent >= lastLoggedPercent + 10) {
+                        emit logMessage(QString("📊 %1: %2% descargado").arg(source).arg(percent));
+                        
+                        // Mostrar tamaño actual
+                        if (QFile::exists(finalOutputPath)) {
+                            qint64 currentSize = QFileInfo(finalOutputPath).size();
+                            emit logMessage(QString("   Tamaño actual: %1").arg(formatBytes(currentSize)));
+                        }
+                        
+                        lastLoggedPercent = percent - (percent % 10);
+                    }
+                }
+            }
+        });
+        
+        connect(&wgetProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                &loop, &QEventLoop::quit);
+        
+        connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+        timer.start(7200000); // 2 horas
+        
+        loop.exec();
+        
+        if (wgetProcess.exitCode() != 0 && !m_canceled) {
+            emit logMessage(QString("❌ wget falló con código: %1").arg(wgetProcess.exitCode()));
+            
+            // Mostrar progreso guardado
+            if (QFile::exists(finalOutputPath)) {
+                qint64 currentSize = QFileInfo(finalOutputPath).size();
+                emit logMessage(QString("📊 Progreso guardado: %1").arg(formatBytes(currentSize)));
+                emit logMessage("  Puedes reanudar más tarde");
+            }
+            
+            return false;
+        }
+        
+        if (QFile::exists(finalOutputPath)) {
+            QFileInfo fileInfo(finalOutputPath);
+            qint64 size = fileInfo.size();
+            
+            if (size > 0) {
+                emit logMessage(QString("✅ Descarga %1 completada: %2 bytes").arg(source).arg(size));
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    QString formatBytes(qint64 bytes) {
+        const qint64 KB = 1024;
+        const qint64 MB = KB * 1024;
+        const qint64 GB = MB * 1024;
+        
+        if (bytes >= GB) {
+            return QString("%1 GB").arg(QString::number(bytes / (double)GB, 'f', 2));
+        } else if (bytes >= MB) {
+            return QString("%1 MB").arg(QString::number(bytes / (double)MB, 'f', 2));
+        } else if (bytes >= KB) {
+            return QString("%1 KB").arg(QString::number(bytes / (double)KB, 'f', 2));
+        } else {
+            return QString("%1 bytes").arg(bytes);
+        }
+    }
     
     bool downloadWithCurlResumable(const QString &url, const QString &outputPath) {
         QProcess curlProcess;
         
-        QString finalOutputPath = outputPath;
-        emit logMessage("  Usando curl para descarga...");
+
+        QString finalOutputPath = QDir::tempPath() + "/atlas_download.tmp";
+        emit logMessage("  Usando archivo temporal consistente: " + finalOutputPath);
+
+        // Mover archivo parcial si existe
+        if (outputPath != finalOutputPath && QFile::exists(outputPath)) {
+            qint64 size = QFileInfo(outputPath).size();
+            if (size > 0) {
+                emit logMessage("📊 Moviendo archivo parcial al destino consistente");
+                if (QFile::copy(outputPath, finalOutputPath)) {
+                    QFile::remove(outputPath);
+                }
+            }
+        }
+
 
         QStringList curlArgs;
         curlArgs << "-L";
-        curlArgs << "--progress-bar";
-        curlArgs << "-C";  // CRÍTICO: reanudar
+        
+        if (url.contains("localhost") || url.contains("127.0.0.1")) {
+            curlArgs << "#";
+            emit logMessage("Usando modo local - progreso simplificado");
+        } else {
+            curlArgs << "--progress-bar";
+        }
+        
+        curlArgs << "-C";
         curlArgs << "-";
         curlArgs << "--output" << finalOutputPath;
         curlArgs << "--location-trusted";
@@ -1517,64 +1556,55 @@ private:
         qint64 totalSize = 0;
         QDateTime downloadStartTime = QDateTime::currentDateTime();
         
-        // Obtener tamaño total del archivo
-        QProcess headProcess;
-        headProcess.start("curl", QStringList() << "-I" << url);
-        headProcess.waitForFinished();
-        QString output = QString::fromUtf8(headProcess.readAllStandardOutput());
-        
-        QRegularExpression re("Content-Length: (\\d+)");
-        QRegularExpressionMatch match = re.match(output);
-        if (match.hasMatch()) {
-            totalSize = match.captured(1).toLongLong();
-            emit logMessage(QString("📏 Tamaño total del archivo: %1").arg(formatBytes(totalSize)));
-        }
-        
-        // Verificar si hay archivo parcial
-        if (QFile::exists(finalOutputPath)) {
-            lastSize = QFileInfo(finalOutputPath).size();
-            if (lastSize > 1024) {
-                emit logMessage(QString("🔧 Reanudando desde %1").arg(formatBytes(lastSize)));
+        if (url.contains("localhost") || url.contains("127.0.0.1")) {
+            QProcess headProcess;
+            headProcess.start("curl", QStringList() << "-I" << url);
+            headProcess.waitForFinished();
+            QString output = QString::fromUtf8(headProcess.readAllStandardOutput());
+            
+            QRegularExpression re("Content-Length: (\\d+)");
+            QRegularExpressionMatch match = re.match(output);
+            if (match.hasMatch()) {
+                totalSize = match.captured(1).toLongLong();
+                emit logMessage(QString("📏 Tamaño total del archivo local: %1").arg(formatBytes(totalSize)));
             }
         }
         
-        connect(&progressTimer, &QTimer::timeout, this, [this, finalOutputPath, &lastSize, totalSize, &downloadStartTime]() {
-            if (QFile::exists(finalOutputPath)) {
-                QFileInfo fileInfo(finalOutputPath);
-                qint64 currentSize = fileInfo.size();
+        connect(&progressTimer, &QTimer::timeout, this, [this, outputPath, &lastSize, totalSize, &downloadStartTime]() {
+            QFileInfo fileInfo(outputPath);
+            qint64 currentSize = fileInfo.size();
+            
+            if (currentSize > lastSize) {
+                QDateTime now = QDateTime::currentDateTime();
+                qint64 elapsedSeconds = downloadStartTime.secsTo(now);
                 
-                if (currentSize > lastSize) {
-                    QDateTime now = QDateTime::currentDateTime();
-                    qint64 elapsedSeconds = downloadStartTime.secsTo(now);
+                if (elapsedSeconds > 0) {
+                    double speed = (currentSize - lastSize) / 1024.0;
+                    QString speedStr = QString::number(speed, 'f', 1);
                     
-                    if (elapsedSeconds > 0) {
-                        double speed = (currentSize - lastSize) / 1024.0;
-                        QString speedStr = QString::number(speed, 'f', 1);
-                        
-                        int percent = 0;
-                        if (totalSize > 0) {
-                            percent = (currentSize * 100) / totalSize;
-                        }
-                        int progress = 5 + (percent * 0.45);
-                        
-                        QString statusMessage;
-                        if (totalSize > 0) {
-                            QString eta = calculateSimpleETA(currentSize, totalSize, downloadStartTime);
-                            statusMessage = QString("Descargando: %1% (%2 KB/s) - %3")
-                                            .arg(percent)
-                                            .arg(speedStr)
-                                            .arg(eta);
-                        } else {
-                            statusMessage = QString("Descargando: %1 a %2 KB/s")
-                                            .arg(formatBytes(currentSize))
-                                            .arg(speedStr);
-                        }
-                        
-                        emit progressUpdated(progress, statusMessage);
+                    int percent = 0;
+                    if (totalSize > 0) {
+                        percent = (currentSize * 100) / totalSize;
+                    }
+                    int progress = 3 + (percent * 0.47);
+                    
+                    QString statusMessage;
+                    if (totalSize > 0) {
+                        QString eta = calculateSimpleETA(currentSize, totalSize, downloadStartTime);
+                        statusMessage = QString("Descargando: %1% (%2 KB/s) - %3")
+                                        .arg(percent)
+                                        .arg(speedStr)
+                                        .arg(eta);
+                    } else {
+                        statusMessage = QString("Descargando: %1 a %2 KB/s")
+                                        .arg(formatBytes(currentSize))
+                                        .arg(speedStr);
                     }
                     
-                    lastSize = currentSize;
+                    emit progressUpdated(progress, statusMessage);
                 }
+                
+                lastSize = currentSize;
             }
         });
         
@@ -1594,8 +1624,8 @@ private:
         if (curlProcess.exitCode() != 0 && !m_canceled) {
             emit logMessage(QString("curl salió con código: %1").arg(curlProcess.exitCode()));
             
-            if (QFile::exists(finalOutputPath)) {
-                qint64 currentSize = QFileInfo(finalOutputPath).size();
+            if (QFile::exists(outputPath)) {
+                qint64 currentSize = QFileInfo(outputPath).size();
                 emit logMessage(QString("Progreso guardado: %1 bytes descargados").arg(currentSize));
             }
             
@@ -1625,7 +1655,6 @@ private:
         }
     }
     
-    // Métodos de extracción (mantener como estaban)
     bool extractArchiveIncremental(const QString &archivePath, const QString &outputDir) {
         emit logMessage(" Preparando directorio destino: " + outputDir);
         
@@ -1842,219 +1871,7 @@ private:
         
         return true;
     }
-    
-    bool extractArchiveSimple(const QString &archivePath, const QString &outputDir) {
-        emit logMessage("  Extrayendo archivo completo (método simple)...");
-        
-        QProcess tarProcess;
-        QStringList tarArgs;
-        tarArgs << "-xf" << archivePath;
-        tarArgs << "-C" << outputDir;
-        
-        // Intentar con strip-components primero
-        tarArgs << "--strip-components=0";
-        
-        emit logMessage("💻 Comando: tar " + tarArgs.join(" "));
-        
-        QElapsedTimer timer;
-        timer.start();
-        
-        tarProcess.start("tar", tarArgs);
-        
-        if (!tarProcess.waitForFinished(300000)) { // 5 minutos timeout
-            emit logMessage("❌ Timeout extrayendo archivo");
-            return false;
-        }
-        
-        if (tarProcess.exitCode() != 0) {
-            QString error = QString::fromUtf8(tarProcess.readAllStandardError());
-            emit logMessage("❌ Error en tar (método simple):");
-            emit logMessage("   " + error.left(200));
-            
-            // Intentar método alternativo sin strip-components
-            emit logMessage("  Intentando método alternativo...");
-            QProcess tarProcess2;
-            tarProcess2.start("tar", QStringList() 
-                << "-xf" << archivePath
-                << "-C" << outputDir);
-            
-            if (!tarProcess2.waitForFinished(300000)) {
-                emit logMessage("❌ Falló método alternativo también");
-                return false;
-            }
-            
-            if (tarProcess2.exitCode() != 0) {
-                QString error2 = QString::fromUtf8(tarProcess2.readAllStandardError());
-                emit logMessage("❌ Error método alternativo: " + error2.left(200));
-                return false;
-            }
-            
-            emit logMessage("✅ Extracción exitosa con método alternativo");
-        } else {
-            emit logMessage(QString("✅ Extracción completada en %1 ms").arg(timer.elapsed()));
-        }
-        
-        // Verificar contenido extraído
-        QDir outputDirObj(outputDir);
-        QStringList extractedItems = outputDirObj.entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
-        
-        if (extractedItems.isEmpty()) {
-            emit logMessage("⚠️  No se encontraron archivos extraídos");
-            return false;
-        }
-        
-        emit logMessage(QString("📊 Total extraído: %1 archivos/directorios").arg(extractedItems.size()));
-        
-        // Reorganizar si es necesario
-        QStringList possibleDirs = {"Atlas_Interactivo-1.0.0-linux-x64", "Atlas_Interactivo"};
-        foreach (const QString &dirName, possibleDirs) {
-            QString dirPath = outputDir + "/" + dirName;
-            if (QDir(dirPath).exists()) {
-                emit logMessage("  Reorganizando desde: " + dirName);
-                if (reorganizeExtractedFiles(outputDir, dirName)) {
-                    emit logMessage("✅ Reorganización completada");
-                }
-                break;
-            }
-        }
-        
-        return true;
-    }
-    
-    QStringList getTarFileList(const QString &archivePath) {
-        QProcess tarProcess;
-        tarProcess.start("tar", QStringList() << "-tf" << archivePath);
-        
-        if (!tarProcess.waitForFinished(120000)) { // 2 minutos timeout
-            emit logMessage("❌ Timeout obteniendo lista de archivos");
-            emit logMessage("⚠️  Intentando método alternativo...");
-            
-            // Método alternativo: extraer directamente sin lista
-            return QStringList(); // Lista vacía para usar extracción simple
-        }
-        
-        if (tarProcess.exitCode() != 0) {
-            QString error = QString::fromUtf8(tarProcess.readAllStandardError());
-            emit logMessage(QString("❌ Error leyendo .tar: %1").arg(error.left(100)));
-            emit logMessage("⚠️  Intentando extracción directa...");
-            return QStringList(); // Lista vacía para usar extracción simple
-        }
-        
-        QString output = QString::fromUtf8(tarProcess.readAllStandardOutput());
-        QStringList fileList = output.split('\n', Qt::SkipEmptyParts);
-        
-        fileList = fileList.filter(QRegularExpression(".+"));
-        
-        emit logMessage(QString("📊 Se leerán %1 archivos del tar").arg(fileList.size()));
-        
-        // Si hay demasiados archivos, usar extracción simple
-        if (fileList.size() > 100000) {
-            emit logMessage("⚠️  Muchos archivos detectados, usando extracción optimizada");
-            // Filtrar solo directorios principales para extracción optimizada
-            QStringList filtered;
-            QSet<QString> dirs;
-            
-            foreach (const QString &file, fileList) {
-                if (file.contains('/')) {
-                    QString dir = file.section('/', 0, 0);
-                    if (!dirs.contains(dir)) {
-                        dirs.insert(dir);
-                        filtered.append(dir + "/");
-                    }
-                } else {
-                    filtered.append(file);
-                }
-            }
-            
-            if (filtered.size() < fileList.size() / 10) {
-                emit logMessage(QString("📊 Extracción optimizada: %1 elementos vs %2 originales")
-                            .arg(filtered.size()).arg(fileList.size()));
-                return filtered;
-            }
-        }
-        
-        return fileList;
-    }
-    
-    bool extractFileGroupWithPrefix(const QString &archivePath, const QString &outputDir, 
-                                    const QStringList &files, const QString &prefix) {
-        if (files.isEmpty()) {
-            return true;
-        }
-        
-        QString tempListFile = QDir::tempPath() + "/tar_list_current.txt";
-        
-        QFile listFile(tempListFile);
-        if (!listFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            emit logMessage("❌ No se pudo crear archivo de lista temporal");
-            return false;
-        }
-        
-        QTextStream out(&listFile);
-        foreach (const QString &file, files) {
-            out << file << "\n";
-        }
-        listFile.close();
-        
-        emit logMessage(QString("📄 Extrayendo %1 archivos...").arg(files.size()));
-        
-        QProcess tarProcess;
-        QStringList tarArgs;
-        tarArgs << "-xf" << archivePath;
-        tarArgs << "-C" << outputDir;
-        
-        if (!prefix.isEmpty() && prefix.endsWith("/")) {
-            emit logMessage("🔧 Aplicando: --strip-components=1 (prefijo: " + prefix + ")");
-            tarArgs << "--strip-components=1";
-        } else {
-            emit logMessage("🔧 Sin --strip-components (no hay prefijo)");
-        }
-        
-        tarArgs << "-T" << tempListFile;
-        
-        emit logMessage("💻 Comando: tar " + tarArgs.join(" "));
-        
-        tarProcess.start("tar", tarArgs);
-        
-        if (!tarProcess.waitForFinished(300000)) {
-            emit logMessage("❌ Timeout extrayendo grupo");
-            QFile::remove(tempListFile);
-            return false;
-        }
-        
-        QFile::remove(tempListFile);
-        
-        if (tarProcess.exitCode() != 0) {
-            QString error = QString::fromUtf8(tarProcess.readAllStandardError());
-            
-            emit logMessage("❌ Error en tar:");
-            QStringList errorLines = error.split('\n', Qt::SkipEmptyParts);
-            for (int i = 0; i < qMin(5, errorLines.size()); i++) {
-                emit logMessage("   " + errorLines[i]);
-            }
-            
-            bool criticalError = false;
-            foreach (const QString &line, errorLines) {
-                if (line.contains("Not found in archive") || 
-                    line.contains("Exiting with failure status") ||
-                    line.contains("Cannot open")) {
-                    criticalError = true;
-                    break;
-                }
-            }
-            
-            if (criticalError) {
-                emit logMessage("❌ ERROR CRÍTICO en extracción");
-                return false;
-            } else if (!error.trimmed().isEmpty()) {
-                emit logMessage("⚠️  Advertencias en tar (continuando...)");
-            }
-        } else {
-            emit logMessage("✅ Grupo extraído exitosamente");
-        }
-        
-        return true;
-    }    
+
     bool reorganizeExtractedFiles(const QString &outputDir, const QString &oldDirName) {
         QString oldDirPath = outputDir + "/" + oldDirName;
         QDir oldDir(oldDirPath);
@@ -2141,6 +1958,224 @@ private:
         
         return failedCount == 0;
     }
+
+    bool extractFileGroupWithPrefix(const QString &archivePath, const QString &outputDir, 
+                                 const QStringList &files, const QString &prefix) {
+        if (files.isEmpty()) {
+            return true;
+        }
+        
+        QString tempListFile = QDir::tempPath() + "/tar_list_current.txt";
+        
+        QFile listFile(tempListFile);
+        if (!listFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            emit logMessage("❌ No se pudo crear archivo de lista temporal");
+            return false;
+        }
+        
+        QTextStream out(&listFile);
+        foreach (const QString &file, files) {
+            out << file << "\n";
+        }
+        listFile.close();
+        
+        emit logMessage(QString("📄 Extrayendo %1 archivos...").arg(files.size()));
+        
+        QProcess tarProcess;
+        QStringList tarArgs;
+        tarArgs << "-xf" << archivePath;
+        tarArgs << "-C" << outputDir;
+        
+        if (!prefix.isEmpty() && prefix.endsWith("/")) {
+            emit logMessage("🔧 Aplicando: --strip-components=1 (prefijo: " + prefix + ")");
+            tarArgs << "--strip-components=1";
+        } else {
+            emit logMessage("🔧 Sin --strip-components (no hay prefijo)");
+        }
+        
+        tarArgs << "-T" << tempListFile;
+        
+        emit logMessage("💻 Comando: tar " + tarArgs.join(" "));
+        
+        tarProcess.start("tar", tarArgs);
+        
+        if (!tarProcess.waitForFinished(300000)) {
+            emit logMessage("❌ Timeout extrayendo grupo");
+            QFile::remove(tempListFile);
+            return false;
+        }
+        
+        QFile::remove(tempListFile);
+        
+        if (tarProcess.exitCode() != 0) {
+            QString error = QString::fromUtf8(tarProcess.readAllStandardError());
+            
+            emit logMessage("❌ Error en tar:");
+            QStringList errorLines = error.split('\n', Qt::SkipEmptyParts);
+            for (int i = 0; i < qMin(5, errorLines.size()); i++) {
+                emit logMessage("   " + errorLines[i]);
+            }
+            
+            bool criticalError = false;
+            foreach (const QString &line, errorLines) {
+                if (line.contains("Not found in archive") || 
+                    line.contains("Exiting with failure status") ||
+                    line.contains("Cannot open")) {
+                    criticalError = true;
+                    break;
+                }
+            }
+            
+            if (criticalError) {
+                emit logMessage("❌ ERROR CRÍTICO en extracción");
+                return false;
+            } else if (!error.trimmed().isEmpty()) {
+                emit logMessage("⚠️  Advertencias en tar (continuando...)");
+            }
+        } else {
+            emit logMessage("✅ Grupo extraído exitosamente");
+        }
+        
+        return true;
+    }
+    
+    QStringList getTarFileList(const QString &archivePath) {
+        QProcess tarProcess;
+        tarProcess.start("tar", QStringList() << "-tf" << archivePath);
+        
+        if (!tarProcess.waitForFinished(120000)) { // 2 minutos timeout
+            emit logMessage("❌ Timeout obteniendo lista de archivos");
+            emit logMessage("⚠️  Intentando método alternativo...");
+            
+            // Método alternativo: extraer directamente sin lista
+            return QStringList(); // Lista vacía para usar extracción simple
+        }
+        
+        if (tarProcess.exitCode() != 0) {
+            QString error = QString::fromUtf8(tarProcess.readAllStandardError());
+            emit logMessage(QString("❌ Error leyendo .tar: %1").arg(error.left(100)));
+            emit logMessage("⚠️  Intentando extracción directa...");
+            return QStringList(); // Lista vacía para usar extracción simple
+        }
+        
+        QString output = QString::fromUtf8(tarProcess.readAllStandardOutput());
+        QStringList fileList = output.split('\n', Qt::SkipEmptyParts);
+        
+        fileList = fileList.filter(QRegularExpression(".+"));
+        
+        emit logMessage(QString("📊 Se leerán %1 archivos del tar").arg(fileList.size()));
+        
+        // Si hay demasiados archivos, usar extracción simple
+        if (fileList.size() > 100000) {
+            emit logMessage("⚠️  Muchos archivos detectados, usando extracción optimizada");
+            // Filtrar solo directorios principales para extracción optimizada
+            QStringList filtered;
+            QSet<QString> dirs;
+            
+            foreach (const QString &file, fileList) {
+                if (file.contains('/')) {
+                    QString dir = file.section('/', 0, 0);
+                    if (!dirs.contains(dir)) {
+                        dirs.insert(dir);
+                        filtered.append(dir + "/");
+                    }
+                } else {
+                    filtered.append(file);
+                }
+            }
+            
+            if (filtered.size() < fileList.size() / 10) {
+                emit logMessage(QString("📊 Extracción optimizada: %1 elementos vs %2 originales")
+                            .arg(filtered.size()).arg(fileList.size()));
+                return filtered;
+            }
+        }
+        
+        return fileList;
+    }
+    
+    bool extractFileGroup(const QString &archivePath, const QString &outputDir, const QStringList &files) {
+        if (files.isEmpty()) {
+            return true;
+        }
+        
+        emit logMessage(QString("📂 Extrayendo %1 archivos...").arg(files.size()));
+        
+        foreach (const QString &filePath, files) {
+            QString fullPath = outputDir + "/" + filePath;
+            QFileInfo fileInfo(fullPath);
+            
+            QDir().mkpath(fileInfo.absolutePath());
+        }
+        
+        QProcess tarProcess;
+        QStringList tarArgs;
+        tarArgs << "-xf" << archivePath;
+        tarArgs << "-C" << outputDir;
+        
+        QStringList filteredFiles;
+        
+        foreach (const QString &file, files) {
+            if (file.startsWith("Atlas_Interactivo-1.0.0-linux-x64/")) {
+                filteredFiles << file;
+            } else if (file.contains("/")) {
+                QString dirPath = file.left(file.lastIndexOf('/'));
+                if (!filteredFiles.contains(dirPath)) {
+                    filteredFiles << dirPath;
+                }
+            } else {
+                filteredFiles << file;
+            }
+        }
+        
+        if (filteredFiles.isEmpty()) {
+            emit logMessage("ℹ️  Extrayendo todo el contenido del archivo...");
+            tarArgs << "--strip-components=0";
+        } else {
+            emit logMessage(QString(" Extrayendo %1 elementos...").arg(filteredFiles.size()));
+            foreach (const QString &file, filteredFiles) {
+                tarArgs << file;
+            }
+        }
+        
+        emit logMessage("🔧 Comando tar: tar " + tarArgs.join(" "));
+        
+        tarProcess.start("tar", tarArgs);
+        
+        if (!tarProcess.waitForFinished(300000)) {
+            emit logMessage("❌ Timeout extrayendo grupo");
+            return false;
+        }
+        
+        if (tarProcess.exitCode() != 0) {
+            QString error = QString::fromUtf8(tarProcess.readAllStandardError());
+            emit logMessage("❌ Error extrayendo grupo: " + error);
+            
+            emit logMessage("  Intentando método alternativo de extracción...");
+            
+            QProcess tarProcess2;
+            tarProcess2.start("tar", QStringList() 
+                << "-xf" << archivePath
+                << "-C" << outputDir
+                << "--strip-components=0");
+            
+            if (!tarProcess2.waitForFinished(300000)) {
+                emit logMessage("❌ Falló método alternativo también");
+                return false;
+            }
+            
+            if (tarProcess2.exitCode() != 0) {
+                QString error2 = QString::fromUtf8(tarProcess2.readAllStandardError());
+                emit logMessage("❌ Error método alternativo: " + error2);
+                return false;
+            }
+            
+            emit logMessage("✅ Extracción exitosa con método alternativo");
+        }
+        
+        emit logMessage("✅ Grupo extraído correctamente");
+        return true;
+    }
     
     void createVersionFile() {
         QString versionFile = m_installDir + "/.atlas_version.json";
@@ -2153,11 +2188,10 @@ private:
             out << "  \"install_path\": \"" << m_installDir << "\",\n";
             out << "  \"install_date\": \"" << QDateTime::currentDateTime().toString(Qt::ISODate) << "\",\n";
             out << "  \"file_type\": \"tar\",\n";
-            out << "  \"download_method\": \"" << m_downloadMethod << "\",\n";
+            out << "  \"download_method\": \"" << m_downloadMethod << "\",\n"; // ========== NUEVO ==========
             out << "  \"download_size\": \"variable\",\n";
             out << "  \"download_resumable\": true,\n";
             out << "  \"download_attempts\": " << m_downloadAttempts << ",\n";
-            out << "  \"partial_size_at_start\": " << m_lastPartialSize << ",\n";
             out << "  \"extraction_method\": \"incremental_groups\"\n";
             out << "}\n";
             file.close();
@@ -2172,18 +2206,16 @@ signals:
     
 private:
     QString m_installDir;
-    QString m_downloadMethod;
-    QString m_ftpUrl;
+    QString m_downloadMethod; // ========== NUEVO ==========
+    QString m_ftpUrl;         // ========== NUEVO ==========
     QString m_driveId;
     QString m_tempArchive;
     bool m_canceled;
-    bool m_installationSuccess;
     int m_downloadAttempts;
-    qint64 m_lastPartialSize;
-    qint64 m_totalSize;
 };
 
 // ========== IMPLEMENTACIÓN PRINCIPAL ==========
+
 
 // ========== NUEVAS FUNCIONES ==========
 
@@ -2191,7 +2223,7 @@ bool InstallerWindow::hasPartialDownload() const {
     QString tempFile = QDir::tempPath() + "/atlas_download.tmp";
     if (QFile::exists(tempFile)) {
         qint64 size = QFileInfo(tempFile).size();
-        return (size > 1024);
+        return (size > 1024); // Más de 1KB para considerar válido
     }
     return false;
 }
@@ -2231,7 +2263,7 @@ bool InstallerWindow::promptForResume(qint64 partialSize) {
         return false;
     }
     
-    return false;
+    return false; // Cancelar
 }
 
 void InstallerWindow::showPartialDownloadInfo() {
@@ -2245,24 +2277,6 @@ void InstallerWindow::showPartialDownloadInfo() {
 
 
 
-void InstallerWindow::cleanupInstallationTemp() {
-    QString tempDir = installDir + "/.temp_download";
-    if (QDir(tempDir).exists()) {
-        QDir dir(tempDir);
-        QStringList tempFiles = dir.entryList(QDir::Files);
-        
-        foreach (const QString &file, tempFiles) {
-            QString filePath = tempDir + "/" + file;
-            if (QFile::remove(filePath)) {
-                qDebug() << "Eliminado archivo temporal:" << filePath;
-            }
-        }
-        
-        // Intentar eliminar el directorio si está vacío
-        dir.rmdir(tempDir);
-    }
-}
-
 // ========== CONSTRUCTOR MODIFICADO ==========
 
 InstallerWindow::InstallerWindow(QWidget *parent) 
@@ -2275,12 +2289,13 @@ InstallerWindow::InstallerWindow(QWidget *parent)
       currentWorker(nullptr),
       currentThread(nullptr),
       m_isInstalling(false),
-      downloadMethod("ftp"),
-      ftpUrl("http://modelos.insmet.cu/atlas/installers/Atlas_Interactivo_Linux.tar"),
-      driveId("1y8_Lt0xO5hp3Wbx1hQrZOc_ZP1Vj70-y")
+      downloadMethod("ftp"),  // Por defecto FTP
+      ftpUrl("ftp://atlas.example.com/Atlas_Interactivo_Linux.tar"),
+      driveId("1y8_Lt0xO5hp3Wbx1hQrZOc_ZP1Vj70-y")  // ID de ejemplo
 {
     qDebug() << "DEBUG: Constructor InstallerWindow - INICIO";
     
+    // Calcular escala DPI basada en la pantalla
     QScreen *screen = QGuiApplication::primaryScreen();
     dpiScale = screen->logicalDotsPerInch() / 96.0;
     if (dpiScale < 1.0) dpiScale = 1.0;
@@ -2291,6 +2306,7 @@ InstallerWindow::InstallerWindow(QWidget *parent)
     
     qDebug() << "DEBUG: Después de setupUI()";
     
+    // Configurar directorio predeterminado
     QString appPath = QCoreApplication::applicationDirPath();
     if (!appPath.isEmpty() && appPath != QDir::currentPath()) {
         installDir = appPath + "/Atlas_Interactivo";
@@ -2302,18 +2318,22 @@ InstallerWindow::InstallerWindow(QWidget *parent)
         directoryEdit->setText(installDir);
     }
     
+    // Inicializar timer para actualizar espacio en disco
     diskSpaceTimer = new QTimer(this);
     diskSpaceTimer->setInterval(2000);
     connect(diskSpaceTimer, &QTimer::timeout, this, &InstallerWindow::updateDiskSpace);
     diskSpaceTimer->start();
     
+    // Verificar espacio en disco inicial
     updateDiskSpace();
     
+    // Mostrar información de descarga parcial si existe
     showPartialDownloadInfo();
     
     qDebug() << "DEBUG: Constructor InstallerWindow - FIN";
 }
 
+// ========== NUEVO MÉTODO PARA CONFIGURAR MÉTODO DE DESCARGA ==========
 void InstallerWindow::setDownloadMethod(bool useFTP, bool useDrive) {
     if (useFTP) {
         downloadMethod = "ftp";
@@ -2332,6 +2352,7 @@ void InstallerWindow::setDownloadMethod(bool useFTP, bool useDrive) {
     qDebug() << "DEBUG: Método de descarga configurado a:" << downloadMethod;
 }
 
+// ========== AGREGAR FUNCIÓN formatBytes FALTANTE ==========
 QString InstallerWindow::formatBytes(qint64 bytes) {
     const qint64 KB = 1024;
     const qint64 MB = KB * 1024;
@@ -2347,6 +2368,8 @@ QString InstallerWindow::formatBytes(qint64 bytes) {
         return QString("%1 bytes").arg(bytes);
     }
 }
+
+
 
 qint64 InstallerWindow::getAvailableDiskSpace(const QString &path)
 {
@@ -2387,6 +2410,10 @@ qint64 InstallerWindow::getAvailableDiskSpacePrecise(const QString &path)
     
     return -1;
 }
+
+
+// ========== NUEVAS FUNCIONES ==========
+
 
 bool InstallerWindow::hasSufficientDiskSpace(qint64 requiredGB)
 {
@@ -3198,111 +3225,188 @@ void InstallerWindow::updateDiskSpacePeriodic() {
     }
 }
 
-
 void InstallerWindow::startInstallation()
 {
-    // Deshabilitar botón inmediatamente
-    installButton->setEnabled(false);
-    browseButton->setEnabled(false);
-    installButton->setText("Instalando...");
+    installDir = directoryEdit->text();
     
-    // Forzar actualización de UI
-    QApplication::processEvents();
+    if (!installDir.endsWith("/Atlas_Interactivo")) {
+        QString newPath = QDir::cleanPath(installDir + "/Atlas_Interactivo");
+        logText->append("[INFO] Ajustando ruta de instalación a: " + newPath);
+        installDir = newPath;
+        directoryEdit->setText(installDir);
+        
+        updateDiskSpace();
+    }
+
+    if (!checkDiskSpace()) {
+        QMessageBox::critical(this, "Espacio insuficiente", 
+            QString("No hay suficiente espacio en disco.\n\n"
+                   "Se requieren 25 GB de espacio libre.\n"
+                   "Espacio disponible: %1\n\n"
+                   "NOTA: Se necesitan 25 GB porque:\n"
+                   "• Archivo comprimido: ~20 GB\n"
+                   "• Buffer de seguridad: 5 GB\n"
+                   "• Archivo temporal se elimina después")
+                   .arg(diskSpaceLabel->text()));
+        return;
+    }
     
-    // Establecer estado de instalación
-    m_isInstalling = true;
-    
-    // CAMBIO: Verificar archivo parcial en la ruta de instalación
-    QString tempDir = installDir + "/.temp_download";
-    QString tempFile = tempDir + "/atlas_download.tmp";
-    
+    // ========== VERIFICAR Y CONFIGURAR REANUDACIÓN ==========
+    QString tempFile = QDir::tempPath() + "/atlas_download.tmp";
     bool hasPartialDownload = false;
     qint64 partialSize = 0;
-    
+    qint64 totalSize = 20LL * 1024 * 1024 * 1024; // 20 GB estimado
+
     if (QFile::exists(tempFile)) {
         partialSize = QFileInfo(tempFile).size();
-        hasPartialDownload = (partialSize > 1024);
+        hasPartialDownload = (partialSize > 1024); // Más de 1KB
         
         if (hasPartialDownload) {
-            // MOSTRAR DIÁLOGO DE REANUDACIÓN MEJORADO
+            // Calcular progreso inicial basado en tamaño parcial
+            int initialPercent = qMin(100, static_cast<int>((partialSize * 100) / totalSize));
+            
+            // Preguntar al usuario qué quiere hacer
             QMessageBox msgBox(this);
             msgBox.setWindowTitle("Descarga parcial detectada");
             msgBox.setIcon(QMessageBox::Question);
             msgBox.setText(QString(
-                "Se detectó una descarga parcial de %1.\n\n"
-                "¿Deseas reanudar la instalación?"
-            ).arg(formatBytes(partialSize)));
+                "Se detectó una descarga parcial de %1 (%2% completado).\n\n"
+                "¿Qué deseas hacer?"
+            ).arg(formatBytes(partialSize)).arg(initialPercent));
             
-            // Asegurarnos que el diálogo no se cierre automáticamente
-            msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
-            msgBox.setDefaultButton(QMessageBox::Yes);
+            QPushButton *resumeButton = msgBox.addButton("Reanudar descarga", QMessageBox::AcceptRole);
+            QPushButton *cleanButton = msgBox.addButton("Eliminar y comenzar desde cero", QMessageBox::DestructiveRole);
+            QPushButton *cancelButton = msgBox.addButton("Cancelar", QMessageBox::RejectRole);
             
-            // Forzar que el diálogo sea modal y no se cierre solo
-            msgBox.setModal(true);
+            msgBox.setDefaultButton(resumeButton);
+            msgBox.exec();
             
-            int result = msgBox.exec();
-            
-            if (result == QMessageBox::No) {
-                // Eliminar archivo parcial
-                QFile::remove(tempFile);
-                hasPartialDownload = false;
-            } else if (result == QMessageBox::Cancel) {
-                // Restaurar UI
-                installButton->setEnabled(true);
-                browseButton->setEnabled(true);
-                installButton->setText("INICIAR INSTALACIÓN");
-                m_isInstalling = false;
+            if (msgBox.clickedButton() == cleanButton) {
+                // Limpiar archivo parcial
+                if (QFile::remove(tempFile)) {
+                    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] 🗑️ Archivo parcial eliminado");
+                    hasPartialDownload = false;
+                    partialSize = 0;
+                }
+            } else if (msgBox.clickedButton() == cancelButton) {
                 return;
             }
-            // Si es Yes, continuar con reanudación
+            // Si es resumeButton, continúa con hasPartialDownload = true
         }
     }
-
     
-    // Configurar UI antes de comenzar
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle("Confirmar instalación");
+    msgBox.setTextFormat(Qt::RichText);
+    
+    QString methodText = (downloadMethod == "ftp") ? "FTP" : "Google Drive";
+    QString resumeText = "";
+    
+    if (hasPartialDownload) {
+        int initialPercent = qMin(100, static_cast<int>((partialSize * 100) / totalSize));
+        resumeText = QString(
+            "<p><b>  SE REANUDARÁ DESDE: %1 (%2% completado)</b></p><br>"
+        ).arg(formatBytes(partialSize)).arg(initialPercent);
+    }
+    
+    msgBox.setText(
+        "<div align='center'>"
+        "<h3>Método de descarga: " + methodText + "</h3>" +
+        resumeText +
+        "<p><b>✅ Descarga resumible con 3 reintentos</b></p>"
+        "<p><b>✅ Extracción por grupos de 50k archivos</b></p>"
+        "<p><b>✅ Espacio temporal máximo: <font color='green'>25 GB</font></b></p>"
+        "<br>"
+        "<p>¿Desea continuar con la instalación?</p>"
+        "</div>"
+    );
+    
+    msgBox.setStandardButtons(QMessageBox::Ok | QMessageBox::No);
+    msgBox.setDefaultButton(QMessageBox::No);
+    
+    if (msgBox.exec() != QMessageBox::Ok) {
+        return;
+    }
+
+    // Verificar dependencia 'tar'
+    QProcess tarCheck;
+    tarCheck.start("which", QStringList() << "tar");
+    tarCheck.waitForFinished();
+    
+    if (tarCheck.exitCode() != 0) {
+        QMessageBox::warning(this, "Dependencia faltante", 
+                           "El programa 'tar' no está instalado.\n\n"
+                           "Instálalo con:\n"
+                           "sudo apt install tar");
+        return;
+    }
+    
+    QDir().mkpath(installDir);
+    
     installButton->setEnabled(false);
     browseButton->setEnabled(false);
     installButton->setText("Instalando...");
     
+    // Iniciar actualización periódica del espacio
     updateDiskSpacePeriodic();
     
-    // ESTABLECER PROGRESO INICIAL SI HAY DESCARGAS PARCIALES
+    // ========== ESTABLECER PROGRESO INICIAL SI HAY DESCARGAS PARCIALES ==========
     if (hasPartialDownload && partialSize > 0) {
-        qint64 totalSize = 20LL * 1024 * 1024 * 1024;
-        int initialPercent = qMin(50, static_cast<int>((partialSize * 50) / totalSize));
+//        int initialPercent = qMin(45, static_cast<int>((partialSize * 45) / totalSize));
+//        updateProgress(initialPercent, QString("Reanudando desde %1 (%2%)").arg(formatBytes(partialSize)).arg(initialPercent));
+
+        // Calcular progreso inicial
+        qint64 estimatedTotal = getEstimatedTotalSize();
+        int initialPercent = qMin(45, static_cast<int>((partialSize * 45) / estimatedTotal));
         
         // Actualizar UI inmediatamente
-        progressBar->setValue(initialPercent);
-        statusLabel->setText(QString("Reanudando desde %1").arg(formatBytes(partialSize)));
-        logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] 🔄 Reanudando instalación desde " + formatBytes(partialSize));
+        QMetaObject::invokeMethod(progressBar, "setValue", 
+            Qt::QueuedConnection, Q_ARG(int, initialPercent));
+        QMetaObject::invokeMethod(statusLabel, "setText", 
+            Qt::QueuedConnection, Q_ARG(QString, 
+            QString("Reanudando desde %1").arg(formatBytes(partialSize))));
         
-        // Forzar actualización
+        // Forzar actualización de la UI
         QApplication::processEvents();
+
+
+
     } else {
         updateProgress(0, "Preparando instalación...");
     }
     
     logText->clear();
     
-    if (hasPartialDownload) {
-        logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ⚡ REANUDANDO instalación");
-        logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] 📊 Progreso previo: " + formatBytes(partialSize));
+    // Mostrar información específica según el caso
+    if (hasPartialDownload && partialSize > 0) {
+        int initialPercent = qMin(45, static_cast<int>((partialSize * 45) / totalSize));
+        logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "]   REANUDANDO instalación...");
+        logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] 📊 Progreso previo: " + formatBytes(partialSize) + 
+                       " (" + QString::number(initialPercent) + "%)");
     } else {
-        logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ▶️ Iniciando instalación");
+        logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Iniciando instalación...");
     }
     
-    QString methodText = (downloadMethod == "ftp") ? "FTP" : "Google Drive";
-    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] 📡 Método: " + methodText);
-    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ⚡ Descarga resumible activada");
+    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Método de descarga: " + methodText);
+    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Descarga resumible activada");
+    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Extracción por grupos de 50k archivos");
+    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] Espacio temporal máximo: 25 GB");
     
-    // Crear worker
+    // Pasar información de reanudación al worker
     currentThread = new QThread;
     currentWorker = new InstallWorker(installDir, downloadMethod, ftpUrl, driveId);
     
+    // ========== PASAR INFORMACIÓN DE REANUDACIÓN AL WORKER ==========
+    if (hasPartialDownload) {
+        // Puedes agregar un método al worker para pasar esta información
+        // Por ahora, lo manejaremos en el worker directamente
+        logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] 🔧 Configurando reanudación...");
+    }
+    
     currentWorker->moveToThread(currentThread);
     m_isInstalling = true;
-    
-    // Conexiones
+
+    // CONEXIONES
     connect(currentWorker, &InstallWorker::progressUpdated, this, 
         [this](int value, const QString &message) {
             QMetaObject::invokeMethod(this, "updateProgress", 
@@ -3326,11 +3430,14 @@ void InstallerWindow::startInstallation()
                 Q_ARG(QString, "[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] " + msg));
         });
     
+    // CONEXIÓN PARA LIMPIEZA
     connect(currentThread, &QThread::finished, currentWorker, &QObject::deleteLater);
     connect(currentThread, &QThread::finished, currentThread, &QObject::deleteLater);
     
+    // Conectar started del thread para iniciar el trabajo
     connect(currentThread, &QThread::started, currentWorker, &InstallWorker::doWork);
     
+    // Iniciar thread
     currentThread->start();
 }
 
@@ -3405,15 +3512,6 @@ void InstallerWindow::updateDiskSpace()
 void InstallerWindow::installationFinished(bool success, const QString &message)
 {
     m_isInstalling = false;
-
-
-    // Limpiar directorio temporal si la instalación fue exitosa
-    if (success) {
-        cleanupInstallationTemp();
-    }
-
-
-
     
     if (diskSpaceTimer) {
         diskSpaceTimer->stop();
@@ -3437,43 +3535,13 @@ void InstallerWindow::installationFinished(bool success, const QString &message)
     browseButton->setEnabled(true);
     installButton->setText("INICIAR INSTALACIÓN");
     
-    // Forzar actualización
-    QApplication::processEvents();
-
-
-
     updateDiskSpace();
     
     if (success) {
         updateProgress(100, "Instalación completada");
         
         logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] " + message);
-
-
-        // ========== VERIFICACIÓN FINAL: Probar el ejecutable ==========
-        QString executable = installDir + "/Atlas_Interactivo";
-        if (QFile::exists(executable)) {
-            logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] 🔍 Probando ejecutable...");
-            
-            QProcess testProcess;
-            testProcess.start(executable, QStringList() << "--version");
-            
-            if (testProcess.waitForStarted(2000)) {
-                testProcess.waitForFinished(5000);
-                
-                if (testProcess.exitCode() == 0) {
-                    QString output = QString::fromUtf8(testProcess.readAllStandardOutput());
-                    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ✅ Ejecutable funciona: " + output.split('\n').first());
-                } else {
-                    logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ⚠️  Ejecutable devuelve código: " + QString::number(testProcess.exitCode()));
-                }
-            } else {
-                logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "] ❌ ¡ADVERTENCIA! El ejecutable no se inicia");
-                logText->append("[" + QDateTime::currentDateTime().toString("hh:mm:ss") + "]   Posible segmentation fault - Reinstala");
-            }
-        }
-
-
+        
         // Limpiar archivo temporal después de instalación exitosa
         QString tempFile = QDir::tempPath() + "/atlas_download.tmp";
         if (QFile::exists(tempFile)) {
@@ -3524,7 +3592,6 @@ void InstallerWindow::installationFinished(bool success, const QString &message)
         }
     }
 }
-
 
 #include "installerwindow.moc"
 EOF

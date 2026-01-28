@@ -1146,3 +1146,902 @@ code {
     background: rgba(241, 80, 47, 0.15);
     border-color: rgba(241, 80, 47, 0.3);
 }
+
+
+
+
+
+
+/* ============================================
+   FOOTER PROFESIONAL - LICENCIA CC
+   ============================================ */
+
+/* Contenedor principal del footer */
+.footer {
+    background: linear-gradient(135deg, var(--footer-bg, #1a1a2e) 0%, var(--footer-bg-dark, #16213e) 100%);
+    color: var(--footer-text, #e6e6e6);
+    padding: 3rem 0 2rem;
+    margin-top: 4rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.footer::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, 
+        transparent 0%, 
+        var(--accent-color, #4dabf7) 50%, 
+        transparent 100%);
+}
+
+.footer-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    max-width: 1200px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+}
+
+/* Logo y tagline */
+.footer-logo {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--accent-color, #4dabf7);
+}
+
+.footer-logo i {
+    font-size: 2rem;
+    color: var(--accent-color, #4dabf7);
+}
+
+.footer-tagline {
+    font-size: 1.1rem;
+    color: var(--footer-text-light, #b0b0b0);
+    margin-bottom: 2rem;
+    font-weight: 300;
+    letter-spacing: 0.5px;
+}
+
+/* Enlaces de navegación */
+.footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1.5rem;
+    margin-bottom: 2.5rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.footer-links a {
+    color: var(--footer-text, #e6e6e6);
+    text-decoration: none;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.footer-links a::after {
+    content: '';
+    position: absolute;
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 2px;
+    background: var(--accent-color, #4dabf7);
+    transition: width 0.3s ease;
+}
+
+.footer-links a:hover {
+    color: var(--accent-color, #4dabf7);
+}
+
+.footer-links a:hover::after {
+    width: 80%;
+}
+
+/* ===== SECCIÓN DE LICENCIA MEJORADA ===== */
+.license-section {
+    width: 100%;
+    max-width: 1000px;
+    margin: 2.5rem auto;
+    padding: 2rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.license-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2rem;
+}
+
+@media (min-width: 768px) {
+    .license-content {
+        flex-direction: row;
+        align-items: flex-start;
+        gap: 2.5rem;
+    }
+}
+
+/* Badge de licencia */
+.license-badge {
+    flex-shrink: 0;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.license-badge:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+.license-img {
+    width: 140px;
+    height: auto;
+    filter: brightness(1.1);
+    transition: filter 0.3s ease;
+}
+
+.license-badge:hover .license-img {
+    filter: brightness(1.3);
+}
+
+/* Detalles de la licencia */
+.license-details {
+    flex: 1;
+    text-align: left;
+}
+
+.license-statement {
+    font-size: 1.1rem;
+    line-height: 1.6;
+    margin-bottom: 1.5rem;
+    color: var(--footer-text, #e6e6e6);
+}
+
+.license-holder {
+    font-weight: 600;
+    color: var(--accent-color, #4dabf7);
+    background: rgba(77, 171, 247, 0.1);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    display: inline-block;
+    margin-right: 0.3rem;
+}
+
+.license-type {
+    color: var(--accent-color, #4dabf7);
+    text-decoration: none;
+    font-weight: 600;
+    border-bottom: 2px solid transparent;
+    transition: border-color 0.3s ease;
+    padding: 0.1rem 0;
+}
+
+.license-type:hover {
+    border-bottom-color: var(--accent-color, #4dabf7);
+}
+
+/* Términos de la licencia */
+.license-terms {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+    padding: 1.5rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    border-left: 4px solid var(--accent-color, #4dabf7);
+    align-items: stretch; /* Añade esto */
+}
+
+.term-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.95rem;
+    height: 100%; /* Añade esto */
+}
+
+.term-item i {
+    font-size: 1.1rem;
+    color: var(--accent-color, #4dabf7);
+}
+
+.term-item:nth-child(3) i {
+    color: #ff6b6b;
+}
+
+.license-note {
+    font-size: 0.9rem;
+    color: var(--footer-text-light, #b0b0b0);
+    font-style: italic;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.contact-link {
+    color: var(--accent-color, #4dabf7);
+    text-decoration: none;
+    font-weight: 500;
+    border-bottom: 1px dotted var(--accent-color, #4dabf7);
+}
+
+.contact-link:hover {
+    border-bottom-style: solid;
+}
+
+/* Información legal */
+.footer-legal {
+    width: 100%;
+    margin-top: 2.5rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.copyright {
+    font-size: 0.9rem;
+    color: var(--footer-text-light, #b0b0b0);
+    margin-bottom: 0.5rem;
+}
+
+.rights {
+    color: var(--footer-text, #e6e6e6);
+    font-weight: 500;
+}
+
+.disclaimer {
+    font-size: 0.85rem;
+    color: var(--footer-text-light, #b0b0b0);
+    font-style: italic;
+    max-width: 800px;
+    margin: 0 auto;
+    line-height: 1.5;
+}
+
+/* Enlaces institucionales */
+.institutional-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1.5rem;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.inst-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--footer-text-light, #b0b0b0);
+    text-decoration: none;
+    font-size: 0.9rem;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.05);
+    transition: all 0.3s ease;
+}
+
+.inst-link:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--accent-color, #4dabf7);
+    transform: translateY(-1px);
+}
+
+.inst-link i {
+    font-size: 0.9rem;
+}
+
+/* Modo claro (si tu sitio lo tiene) */
+[data-theme="light"] .footer {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    color: #333;
+}
+
+[data-theme="light"] .license-section {
+    background: rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .license-badge {
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .license-terms {
+    background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] .inst-link {
+    background: rgba(0, 0, 0, 0.05);
+    color: #666;
+}
+
+[data-theme="light"] .inst-link:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: var(--accent-color, #0066cc);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .footer {
+        padding: 2rem 1rem;
+    }
+    
+    .license-section {
+        padding: 1.5rem;
+        margin: 1.5rem 0;
+    }
+    
+    .license-content {
+        text-align: center;
+    }
+    
+    .license-details {
+        text-align: center;
+    }
+    
+    .license-terms {
+        grid-template-columns: 1fr;
+    }
+    
+    .institutional-links {
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+    }
+}
+
+/* Animaciones sutiles */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.license-section {
+    animation: fadeInUp 0.6s ease-out 0.2s both;
+}
+
+
+:root {
+    --footer-bg: #f8f9fa;
+    --footer-bg-dark: #e9ecef;
+    --footer-text: #333;
+    --footer-text-light: #666;
+    --accent-color: #0066cc;
+    --accent-hover: #004d99;
+
+
+}
+
+[data-theme="dark"] {
+
+    --footer-bg: #1a1a2e;
+    --footer-bg-dark: #16213e;
+    --footer-text: #e6e6e6;
+    --footer-text-light: #b0b0b0;
+    --accent-color: #4dabf7;
+    --accent-hover: #339af0;
+
+
+}
+
+
+
+
+
+
+
+
+/* ============================================
+   FOOTER PROFESIONAL - LICENCIA CC
+   ============================================ */
+
+/* Contenedor principal del footer */
+.footer {
+    background: linear-gradient(135deg, var(--footer-bg, #1a1a2e) 0%, var(--footer-bg-dark, #16213e) 100%);
+    color: var(--footer-text, #e6e6e6);
+    padding: 3rem 0 2rem;
+    margin-top: 4rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.footer::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, 
+        transparent 0%, 
+        var(--accent-color, #4dabf7) 50%, 
+        transparent 100%);
+}
+
+.footer-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    max-width: 1200px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+}
+
+/* Logo y tagline */
+.footer-logo {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--accent-color, #4dabf7);
+}
+
+.footer-logo i {
+    font-size: 2rem;
+    color: var(--accent-color, #4dabf7);
+}
+
+.footer-tagline {
+    font-size: 1.1rem;
+    color: var(--footer-text-light, #b0b0b0);
+    margin-bottom: 2rem;
+    font-weight: 300;
+    letter-spacing: 0.5px;
+}
+
+/* Enlaces de navegación */
+.footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1.5rem;
+    margin-bottom: 2.5rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.footer-links a {
+    color: var(--footer-text, #e6e6e6);
+    text-decoration: none;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.footer-links a::after {
+    content: '';
+    position: absolute;
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 2px;
+    background: var(--accent-color, #4dabf7);
+    transition: width 0.3s ease;
+}
+
+.footer-links a:hover {
+    color: var(--accent-color, #4dabf7);
+}
+
+.footer-links a:hover::after {
+    width: 80%;
+}
+
+/* ===== SECCIÓN DE LICENCIA MEJORADA ===== */
+.license-section {
+    width: 100%;
+    max-width: 1000px;
+    margin: 2.5rem auto;
+    padding: 2rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.license-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2rem;
+}
+
+@media (min-width: 768px) {
+    .license-content {
+        flex-direction: row;
+        align-items: flex-start;
+        gap: 2.5rem;
+    }
+}
+
+/* Badge de licencia */
+.license-badge {
+    flex-shrink: 0;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.license-badge:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* SVG combinado */
+.license-img-svg {
+    width: 180px;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+    filter: brightness(1.05);
+    transition: all 0.3s ease;
+    max-width: 100%;
+}
+
+.license-badge:hover .license-img-svg {
+    filter: brightness(1.2);
+    transform: scale(1.05);
+}
+
+/* Detalles de la licencia */
+.license-details {
+    flex: 1;
+    text-align: left;
+}
+
+.license-statement {
+    font-size: 1.1rem;
+    line-height: 1.6;
+    margin-bottom: 1.5rem;
+    color: var(--footer-text, #e6e6e6);
+}
+
+.license-holder {
+    font-weight: 600;
+    color: var(--accent-color, #4dabf7);
+    background: rgba(77, 171, 247, 0.1);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    display: inline-block;
+    margin-right: 0.3rem;
+}
+
+.license-type {
+    color: var(--accent-color, #4dabf7);
+    text-decoration: none;
+    font-weight: 600;
+    border-bottom: 2px solid transparent;
+    transition: border-color 0.3s ease;
+    padding: 0.1rem 0;
+}
+
+.license-type:hover {
+    border-bottom-color: var(--accent-color, #4dabf7);
+}
+
+/* Términos de la licencia con iconos */
+.license-terms {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.25rem;
+    margin: 1.75rem 0;
+    padding: 1.5rem;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    align-items: stretch; /* Nueva línea */
+}
+
+.term-item {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    height: 100%; /* Nueva línea */
+}
+
+.term-icon {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: rgba(77, 171, 247, 0.1);
+    padding: 0.5rem;
+}
+
+.term-icon-img {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+    filter: brightness(1.1);
+}
+
+/* Iconos específicos por término */
+.term-item:nth-child(2) .term-icon {
+    background: rgba(108, 180, 63, 0.1);
+}
+
+.term-item:nth-child(3) .term-icon {
+    background: rgba(255, 107, 107, 0.1);
+}
+
+.term-content {
+    flex: 1;
+}
+
+.term-content h4 {
+    font-size: 1rem;
+    margin-bottom: 0.4rem;
+    color: var(--footer-text, #e6e6e6);
+    font-weight: 600;
+}
+
+.term-content p {
+    font-size: 0.9rem;
+    color: var(--footer-text-light, #b0b0b0);
+    line-height: 1.5;
+    margin: 0;
+}
+
+.license-note {
+    font-size: 0.9rem;
+    color: var(--footer-text-light, #b0b0b0);
+    font-style: italic;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.contact-link {
+    color: var(--accent-color, #4dabf7);
+    text-decoration: none;
+    font-weight: 500;
+    border-bottom: 1px dotted var(--accent-color, #4dabf7);
+}
+
+.contact-link:hover {
+    border-bottom-style: solid;
+}
+
+/* Información legal */
+.footer-legal {
+    width: 100%;
+    margin-top: 2.5rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.copyright {
+    font-size: 0.9rem;
+    color: var(--footer-text-light, #b0b0b0);
+    margin-bottom: 0.5rem;
+}
+
+.rights {
+    color: var(--footer-text, #e6e6e6);
+    font-weight: 500;
+}
+
+.disclaimer {
+    font-size: 0.85rem;
+    color: var(--footer-text-light, #b0b0b0);
+    font-style: italic;
+    max-width: 800px;
+    margin: 0 auto;
+    line-height: 1.5;
+}
+
+/* Enlaces institucionales */
+.institutional-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1.5rem;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.inst-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--footer-text-light, #b0b0b0);
+    text-decoration: none;
+    font-size: 0.9rem;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.05);
+    transition: all 0.3s ease;
+}
+
+.inst-link:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--accent-color, #4dabf7);
+    transform: translateY(-1px);
+}
+
+.inst-link i {
+    font-size: 0.9rem;
+}
+
+/* Modo claro */
+[data-theme="light"] .footer {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    color: #333;
+}
+
+[data-theme="light"] .license-section {
+    background: rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .license-badge {
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .license-img-svg {
+    filter: brightness(0.95);
+}
+
+[data-theme="light"] .license-badge:hover .license-img-svg {
+    filter: brightness(1);
+}
+
+[data-theme="light"] .license-terms {
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .term-icon {
+    background: rgba(0, 102, 204, 0.08);
+}
+
+[data-theme="light"] .term-item:nth-child(2) .term-icon {
+    background: rgba(108, 180, 63, 0.08);
+}
+
+[data-theme="light"] .term-item:nth-child(3) .term-icon {
+    background: rgba(255, 107, 107, 0.08);
+}
+
+[data-theme="light"] .inst-link {
+    background: rgba(0, 0, 0, 0.05);
+    color: #666;
+}
+
+[data-theme="light"] .inst-link:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: var(--accent-color, #0066cc);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .footer {
+        padding: 2rem 1rem;
+    }
+    
+    .license-section {
+        padding: 1.5rem;
+        margin: 1.5rem 0;
+    }
+    
+    .license-content {
+        text-align: center;
+    }
+    
+    .license-details {
+        text-align: center;
+    }
+    
+    .license-terms {
+        grid-template-columns: 1fr;
+    }
+    
+    .term-item {
+        flex-direction: column;
+        text-align: center;
+        align-items: center;
+    }
+    
+    .term-content {
+        text-align: center;
+    }
+    
+    .term-icon {
+        margin: 0 auto 0.5rem;
+    }
+    
+    .institutional-links {
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+    }
+}
+
+@media (min-width: 992px) {
+    .license-terms {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+/* Animaciones sutiles */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.license-section {
+    animation: fadeInUp 0.6s ease-out 0.2s both;
+}
+
+/* Variables */
+:root {
+    --footer-bg: #f8f9fa;
+    --footer-bg-dark: #e9ecef;
+    --footer-text: #333;
+    --footer-text-light: #666;
+    --accent-color: #0066cc;
+    --accent-hover: #004d99;
+}
+
+[data-theme="dark"] {
+    --footer-bg: #1a1a2e;
+    --footer-bg-dark: #16213e;
+    --footer-text: #e6e6e6;
+    --footer-text-light: #b0b0b0;
+    --accent-color: #4dabf7;
+    --accent-hover: #339af0;
+}
